@@ -36,11 +36,11 @@ import copy
 
 DURATIONS = {
     "chair_massage": 10,
-    "hand_massage": 15,
-    "nail_stamping": 15,
+    "hand_massage": 10,
+    "nail_stamping": 10,
     "hair": 60,
     "makeup": 60,
-    "portrait": 10,
+    "portrait": 5,
 }
 
 # Time-only tuples (hour, minute) — resolved to datetimes in Scheduler.__init__
