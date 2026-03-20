@@ -226,7 +226,7 @@ class Scheduler:
 
         day_start = WINDOWS["hair"][0]  # 11:30 AM
 
-        # ── 1. Hair ────────────────────────────────────────────────────────────
+        # ── 1. Hair (anytime, independent of makeup) ───────────────────────────
         hair_end = day_start
         if model.get("wants_hair", True):
             assigned_hair = model.get("assigned_hair_stylist", "")
@@ -254,8 +254,8 @@ class Scheduler:
                 appointments["hair"] = {"provider": best_candidate, "start": start, "end": end}
                 hair_end = end
 
-        # ── 3. Makeup (after hair) ─────────────────────────────────────────────
-        makeup_end = hair_end
+        # ── 3. Makeup (anytime, independent of hair) ───────────────────────────
+        makeup_end = day_start
         if model.get("wants_makeup", True):
             assigned_mu = model.get("assigned_makeup_artist", "")
             booked_hair = appointments.get("hair", {}).get("provider", "")
@@ -269,11 +269,11 @@ class Scheduler:
             # Find earliest available slot across all artists; prefer assigned if within 30 min of best
             best_slot, best_candidate = None, None
             for candidate in all_makeup:
-                slot = self._find_slot("makeup", f"makeup::{candidate}", hair_end, group_key, model_busy)
+                slot = self._find_slot("makeup", f"makeup::{candidate}", day_start, group_key, model_busy)
                 if slot and (best_slot is None or slot[0] < best_slot[0]):
                     best_slot, best_candidate = slot, candidate
             if assigned_mu and f"makeup::{assigned_mu}" in self.calendars and best_slot:
-                assigned_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", hair_end, group_key, model_busy)
+                assigned_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", day_start, group_key, model_busy)
                 if assigned_slot and (assigned_slot[0] - best_slot[0]).total_seconds() <= 1800:
                     best_slot, best_candidate = assigned_slot, assigned_mu
             if best_slot:
