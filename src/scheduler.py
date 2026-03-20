@@ -121,6 +121,7 @@ class Scheduler:
         event_date: str = "2026-01-01",
         hair_duration_min: int = 60,
         makeup_duration_min: int = 60,
+        **kwargs,  # absorb removed params (e.g. num_massage_tables) from older app.py
     ):
         global WINDOWS, REHEARSAL_BLACKOUTS
         WINDOWS = {
