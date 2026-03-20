@@ -249,17 +249,18 @@ class Scheduler:
         # ── 2. Hair ────────────────────────────────────────────────────────────
         hair_end = massage_end
         if model.get("wants_hair", True):
-            hair_artist = model.get("assigned_hair_stylist", "")
-            # Try assigned artist first, then fall back to any available hair artist
-            hair_candidates = []
-            if hair_artist and f"hair::{hair_artist}" in self.calendars:
-                hair_candidates.append(hair_artist)
-            for key in sorted(self.calendars):
-                if key.startswith("hair::") and key != f"hair::{hair_artist}":
-                    a_name = key[len("hair::"):]
-                    artist_info = self.artists.get(a_name)
-                    if artist_info and artist_info.get("role") in ("hair", "both"):
-                        hair_candidates.append(a_name)
+            assigned_hair = model.get("assigned_hair_stylist", "")
+            # Build fallback list: assigned artist first, then others sorted by fewest bookings
+            fallbacks = [
+                a_name for key in self.calendars
+                if key.startswith("hair::")
+                for a_name in [key[len("hair::"):]]
+                if a_name != assigned_hair
+                and self.artists.get(a_name, {}).get("role") in ("hair", "both")
+            ]
+            fallbacks.sort(key=lambda a: len(self.calendars[f"hair::{a}"].slots))
+            hair_candidates = (([assigned_hair] if assigned_hair and f"hair::{assigned_hair}" in self.calendars else [])
+                               + fallbacks)
             for candidate in hair_candidates:
                 slot = self._find_slot("hair", f"hair::{candidate}", massage_end, group_key, model_busy)
                 if slot:
@@ -273,20 +274,18 @@ class Scheduler:
         # ── 3. Makeup (after hair) ─────────────────────────────────────────────
         makeup_end = hair_end
         if model.get("wants_makeup", True):
-            makeup_artist = model.get("assigned_makeup_artist", "")
-            booked_hair_artist = appointments.get("hair", {}).get("provider", "")
-            # Try assigned artist first, then fall back to any available makeup artist
-            makeup_candidates = []
-            if makeup_artist and f"makeup::{makeup_artist}" in self.calendars:
-                makeup_candidates.append(makeup_artist)
-            for key in sorted(self.calendars):
-                if key.startswith("makeup::") and key != f"makeup::{makeup_artist}":
-                    a_name = key[len("makeup::"):]
-                    if a_name == booked_hair_artist:
-                        continue  # don't use same artist for both
-                    artist_info = self.artists.get(a_name)
-                    if artist_info and artist_info.get("role") in ("makeup", "both"):
-                        makeup_candidates.append(a_name)
+            assigned_mu = model.get("assigned_makeup_artist", "")
+            booked_hair = appointments.get("hair", {}).get("provider", "")
+            fallbacks = [
+                a_name for key in self.calendars
+                if key.startswith("makeup::")
+                for a_name in [key[len("makeup::"):]]
+                if a_name != assigned_mu and a_name != booked_hair
+                and self.artists.get(a_name, {}).get("role") in ("makeup", "both")
+            ]
+            fallbacks.sort(key=lambda a: len(self.calendars[f"makeup::{a}"].slots))
+            makeup_candidates = (([assigned_mu] if assigned_mu and f"makeup::{assigned_mu}" in self.calendars else [])
+                                 + fallbacks)
             for candidate in makeup_candidates:
                 slot = self._find_slot("makeup", f"makeup::{candidate}", hair_end, group_key, model_busy)
                 if slot:
