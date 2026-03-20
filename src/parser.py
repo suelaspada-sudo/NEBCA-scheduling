@@ -103,6 +103,7 @@ GROUP_ROW_PATTERNS = [
     ("group1",           ["group 1", "group1"]),
     ("group2",           ["group 2", "group2"]),
     ("hope_ambassador",  ["hope ambassador", "hope ambassadors", "hope amb"]),
+    ("board_member",     ["board member", "board members", "board"]),
 ]
 
 

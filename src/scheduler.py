@@ -16,20 +16,21 @@ Hard constraints:
   - No service during rehearsal blackout:
       Group 1:               15:00–16:00
       Group 2 + Hope Amb:    13:30–14:30
+      Board Members:         no blackout
   - Portrait window: 13:30–18:30
   - One-at-a-time per provider (artist / massage table / portrait slot)
+  - No two services overlap for the same model
 
 Durations (minutes):
-  - chair_massage : 20
-  - hand_massage  : 15
-  - nail_stamping : 15
+  - chair_massage : 10
+  - hand_massage  : 10
+  - nail_stamping : 10
   - hair          : 60
   - makeup        : 60
-  - portrait      : 10  (includes transition)
+  - portrait      : 5
 """
 
 from datetime import datetime, timedelta
-from collections import defaultdict
 import copy
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -57,18 +58,20 @@ _BLACKOUT_TIMES = {
     "group1":           ((15, 0), (16, 0)),
     "group2":           ((13, 30), (14, 30)),
     "hope_ambassador":  ((13, 30), (14, 30)),
+    # board_member: no blackout
 }
 
 
 def _make_dt(date_str: str, h: int, m: int) -> datetime:
     return datetime.strptime(f"{date_str} {h:02d}:{m:02d}", "%Y-%m-%d %H:%M")
 
-GROUP_LABELS = {
-    "group1": ["group 1", "group1", "1"],
-    "group2": ["group 2", "group2", "2"],
-    "hope_ambassador": ["hope ambassador", "hope ambassadors", "ha", "hope amb"],
-}
 
+GROUP_LABELS = {
+    "group1":          ["group 1", "group1", "1"],
+    "group2":          ["group 2", "group2", "2"],
+    "hope_ambassador": ["hope ambassador", "hope ambassadors", "ha", "hope amb"],
+    "board_member":    ["board member", "board members", "board"],
+}
 
 # These are populated by Scheduler.__init__ with the real event date
 WINDOWS: dict = {}
@@ -112,27 +115,6 @@ class ProviderCalendar:
     def book(self, start: datetime, end: datetime, model_name: str):
         self.slots.append((start, end, model_name))
 
-    def next_free_after(self, earliest: datetime, duration_min: int) -> datetime | None:
-        """Find the earliest slot >= earliest that fits duration_min minutes."""
-        candidate = earliest
-        duration = timedelta(minutes=duration_min)
-        # Try every minute up to end of day
-        deadline = earliest.replace(hour=19, minute=0, second=0, microsecond=0)
-        while candidate + duration <= deadline:
-            end = candidate + duration
-            if self.is_free(candidate, end):
-                return candidate
-            # Jump to end of next conflicting slot
-            jumped = False
-            for s, e, _ in sorted(self.slots, key=lambda x: x[0]):
-                if _overlaps(candidate, end, s, e):
-                    candidate = e
-                    jumped = True
-                    break
-            if not jumped:
-                candidate += timedelta(minutes=1)
-        return None
-
 
 # ─── Scheduler ───────────────────────────────────────────────────────────────
 
@@ -149,7 +131,6 @@ class Scheduler:
         hair_duration_min: int = 60,
         makeup_duration_min: int = 60,
     ):
-        # Build date-aware windows and blackouts
         global WINDOWS, REHEARSAL_BLACKOUTS
         WINDOWS = {
             svc: (_make_dt(event_date, s[0], s[1]), _make_dt(event_date, e[0], e[1]))
@@ -166,7 +147,6 @@ class Scheduler:
         self.hair_duration = hair_duration_min
         self.makeup_duration = makeup_duration_min
 
-        # Update durations from config
         DURATIONS["hair"] = hair_duration_min
         DURATIONS["makeup"] = makeup_duration_min
 
@@ -178,20 +158,16 @@ class Scheduler:
             self.calendars[f"makeup::{a['name']}"] = ProviderCalendar(a["name"], "makeup")
 
         for i in range(num_massage_tables):
-            key = f"chair_massage::table{i+1}"
-            self.calendars[key] = ProviderCalendar(f"Massage Table {i+1}", "chair_massage")
+            self.calendars[f"chair_massage::table{i+1}"] = ProviderCalendar(f"Massage Table {i+1}", "chair_massage")
 
         for i in range(num_hand_massage_tables):
-            key = f"hand_massage::table{i+1}"
-            self.calendars[key] = ProviderCalendar(f"Hand Massage {i+1}", "hand_massage")
+            self.calendars[f"hand_massage::table{i+1}"] = ProviderCalendar(f"Hand Massage {i+1}", "hand_massage")
 
         for i in range(num_nail_stations):
-            key = f"nail_stamping::station{i+1}"
-            self.calendars[key] = ProviderCalendar(f"Nail Station {i+1}", "nail_stamping")
+            self.calendars[f"nail_stamping::station{i+1}"] = ProviderCalendar(f"Nail Station {i+1}", "nail_stamping")
 
         for i in range(num_portrait_slots):
-            key = f"portrait::slot{i+1}"
-            self.calendars[key] = ProviderCalendar(f"Portrait Slot {i+1}", "portrait")
+            self.calendars[f"portrait::slot{i+1}"] = ProviderCalendar(f"Portrait Slot {i+1}", "portrait")
 
         self.schedule: list[dict] = []
 
@@ -201,61 +177,74 @@ class Scheduler:
         provider_key: str,
         earliest: datetime,
         group_key: str | None,
+        model_busy: list[tuple[datetime, datetime]],
     ) -> tuple[datetime, datetime] | None:
-        """Find the next available slot for a provider, respecting blackouts and windows."""
+        """
+        Find the earliest slot >= earliest that is free for both the provider
+        and the model, outside any blackout window, within the service window.
+        """
         win_start, win_end = WINDOWS[service]
-        duration = DURATIONS[service]
+        dur = timedelta(minutes=DURATIONS[service])
         cal = self.calendars.get(provider_key)
         if not cal:
             return None
 
         start = max(earliest, win_start)
-        deadline = win_end
 
-        while True:
-            end = start + timedelta(minutes=duration)
-            if end > deadline:
-                return None
+        while start + dur <= win_end:
+            end = start + dur
+
+            # Jump past blackout if needed
             if _in_blackout(start, end, group_key):
-                # Jump past blackout
-                blackout_end = REHEARSAL_BLACKOUTS[group_key][1]
-                start = blackout_end
+                start = REHEARSAL_BLACKOUTS[group_key][1]
                 continue
-            if cal.is_free(start, end):
-                return start, end
-            # Advance past conflict
-            next_start = cal.next_free_after(start, duration)
-            if next_start is None:
-                return None
-            start = next_start
+
+            # Check provider availability
+            provider_conflict = None
+            for s, e, _ in sorted(cal.slots, key=lambda x: x[0]):
+                if _overlaps(start, end, s, e):
+                    provider_conflict = e
+                    break
+            if provider_conflict is not None:
+                start = provider_conflict
+                continue
+
+            # Check model's own schedule (no personal overlaps)
+            model_conflict = None
+            for ms, me in sorted(model_busy):
+                if _overlaps(start, end, ms, me):
+                    model_conflict = me
+                    break
+            if model_conflict is not None:
+                start = model_conflict
+                continue
+
+            return start, end
+
+        return None
 
     def _book(self, service: str, provider_key: str, start: datetime, end: datetime, model_name: str):
-        cal = self.calendars[provider_key]
-        cal.book(start, end, model_name)
+        self.calendars[provider_key].book(start, end, model_name)
 
     def _schedule_model(self, model: dict) -> dict:
         name = model["name"]
         group_key = _group_key(model)
-
         appointments = {}
+        model_busy: list[tuple[datetime, datetime]] = []
 
-        # ── 1. Chair massage (must happen before hair AND makeup) ──────────────
-        day_start = WINDOWS["chair_massage"][0]  # 12:00 PM on event day
+        day_start = WINDOWS["chair_massage"][0]  # 12:00 PM
+
+        # ── 1. Chair massage (before hair & makeup) ────────────────────────────
         massage_end = day_start
-        if True:  # all models offered massage
-            massage_keys = [k for k in self.calendars if k.startswith("chair_massage::")]
-            for mk in massage_keys:
-                slot = self._find_slot("chair_massage", mk, day_start, group_key)
-                if slot:
-                    start, end = slot
-                    self._book("chair_massage", mk, start, end, name)
-                    appointments["chair_massage"] = {
-                        "provider": self.calendars[mk].name,
-                        "start": start,
-                        "end": end,
-                    }
-                    massage_end = end
-                    break
+        for mk in sorted(k for k in self.calendars if k.startswith("chair_massage::")):
+            slot = self._find_slot("chair_massage", mk, day_start, group_key, model_busy)
+            if slot:
+                start, end = slot
+                self._book("chair_massage", mk, start, end, name)
+                model_busy.append((start, end))
+                appointments["chair_massage"] = {"provider": self.calendars[mk].name, "start": start, "end": end}
+                massage_end = end
+                break
 
         # ── 2. Hair ────────────────────────────────────────────────────────────
         hair_end = massage_end
@@ -263,77 +252,59 @@ class Scheduler:
             hair_artist = model.get("assigned_hair_stylist", "")
             hair_key = f"hair::{hair_artist}"
             if hair_key in self.calendars:
-                slot = self._find_slot("hair", hair_key, massage_end, group_key)
+                slot = self._find_slot("hair", hair_key, massage_end, group_key, model_busy)
                 if slot:
                     start, end = slot
                     self._book("hair", hair_key, start, end, name)
-                    appointments["hair"] = {
-                        "provider": hair_artist,
-                        "start": start,
-                        "end": end,
-                    }
+                    model_busy.append((start, end))
+                    appointments["hair"] = {"provider": hair_artist, "start": start, "end": end}
                     hair_end = end
 
-        # ── 3. Makeup (must start after hair is done) ─────────────────────────
+        # ── 3. Makeup (after hair) ─────────────────────────────────────────────
         makeup_end = hair_end
         if model.get("wants_makeup", True):
             makeup_artist = model.get("assigned_makeup_artist", "")
             makeup_key = f"makeup::{makeup_artist}"
             if makeup_key in self.calendars:
-                slot = self._find_slot("makeup", makeup_key, hair_end, group_key)
+                slot = self._find_slot("makeup", makeup_key, hair_end, group_key, model_busy)
                 if slot:
                     start, end = slot
                     self._book("makeup", makeup_key, start, end, name)
-                    appointments["makeup"] = {
-                        "provider": makeup_artist,
-                        "start": start,
-                        "end": end,
-                    }
+                    model_busy.append((start, end))
+                    appointments["makeup"] = {"provider": makeup_artist, "start": start, "end": end}
                     makeup_end = end
 
-        # ── 4. Portrait (after both hair AND makeup) ──────────────────────────
+        # ── 4. Portrait (after hair + makeup, within portrait window) ──────────
         glam_done = max(hair_end, makeup_end)
         portrait_earliest = max(glam_done, WINDOWS["portrait"][0])
-        portrait_keys = [k for k in self.calendars if k.startswith("portrait::")]
-        for pk in portrait_keys:
-            slot = self._find_slot("portrait", pk, portrait_earliest, group_key)
+        for pk in sorted(k for k in self.calendars if k.startswith("portrait::")):
+            slot = self._find_slot("portrait", pk, portrait_earliest, group_key, model_busy)
             if slot:
                 start, end = slot
                 self._book("portrait", pk, start, end, name)
-                appointments["portrait"] = {
-                    "provider": self.calendars[pk].name,
-                    "start": start,
-                    "end": end,
-                }
+                model_busy.append((start, end))
+                appointments["portrait"] = {"provider": self.calendars[pk].name, "start": start, "end": end}
                 break
 
-        # ── 5. Hand massage (any time) ─────────────────────────────────────────
-        hand_keys = [k for k in self.calendars if k.startswith("hand_massage::")]
-        for hk in hand_keys:
-            slot = self._find_slot("hand_massage", hk, day_start, group_key)
+        # ── 5. Hand massage (any time, non-overlapping with model's schedule) ──
+        for hk in sorted(k for k in self.calendars if k.startswith("hand_massage::")):
+            slot = self._find_slot("hand_massage", hk, day_start, group_key, model_busy)
             if slot:
                 start, end = slot
                 self._book("hand_massage", hk, start, end, name)
-                appointments["hand_massage"] = {
-                    "provider": self.calendars[hk].name,
-                    "start": start,
-                    "end": end,
-                }
+                model_busy.append((start, end))
+                appointments["hand_massage"] = {"provider": self.calendars[hk].name, "start": start, "end": end}
                 break
 
-        # ── 6. Nail stamping (any time, only if requested) ─────────────────────
+        # ── 6. Nail stamping (only if requested) ──────────────────────────────
         if model.get("wants_nails", False):
-            nail_keys = [k for k in self.calendars if k.startswith("nail_stamping::")]
-            for nk in nail_keys:
-                slot = self._find_slot("nail_stamping", nk, day_start, group_key)
+            for nk in sorted(k for k in self.calendars if k.startswith("nail_stamping::")):
+                slot = self._find_slot("nail_stamping", nk, day_start, group_key, model_busy)
                 if slot:
                     start, end = slot
                     self._book("nail_stamping", nk, start, end, name)
-                    appointments["nail_stamping"] = {
-                        "provider": self.calendars[nk].name,
-                        "start": start,
-                        "end": end,
-                    }
+                    model_busy.append((start, end))
+                    appointments["nail_stamping"] = {"provider": self.calendars[nk].name, "start": start, "end": end}
                     break
 
         return {
@@ -346,19 +317,13 @@ class Scheduler:
         }
 
     def run(self) -> list[dict]:
-        """Schedule all models. Returns list of schedule entries."""
-        # Sort: Group 2 / Hope Ambassadors first (tighter portrait window at 1:30)
+        """Schedule all models. Group 2 / Hope Ambassadors first (tighter window)."""
         def priority(model):
             gk = _group_key(model)
-            if gk in ("group2", "hope_ambassador"):
-                return 0
-            return 1
+            return 0 if gk in ("group2", "hope_ambassador") else 1
 
-        ordered = sorted(self.models, key=priority)
-
-        for model in ordered:
-            entry = self._schedule_model(model)
-            self.schedule.append(entry)
+        for model in sorted(self.models, key=priority):
+            self.schedule.append(self._schedule_model(model))
 
         return self.schedule
 
@@ -381,24 +346,24 @@ def schedule_to_rows(schedule: list[dict]) -> list[dict]:
             a = appts.get(key, {})
             return fmt_time(a.get("start")), fmt_time(a.get("end")), a.get("provider", "")
 
-        cm_s, cm_e, cm_p = appt("chair_massage")
-        h_s, h_e, h_p = appt("hair")
-        m_s, m_e, m_p = appt("makeup")
-        p_s, p_e, p_p = appt("portrait")
-        hm_s, hm_e, hm_p = appt("hand_massage")
-        n_s, n_e, n_p = appt("nail_stamping")
+        cm_s, cm_e, _ = appt("chair_massage")
+        h_s,  h_e,  h_p  = appt("hair")
+        m_s,  m_e,  m_p  = appt("makeup")
+        p_s,  p_e,  _    = appt("portrait")
+        hm_s, hm_e, _    = appt("hand_massage")
+        n_s,  n_e,  _    = appt("nail_stamping")
 
         rows.append({
-            "Model": entry["model"],
-            "Group": entry["group"],
-            "Rehearsal": entry.get("rehearsal_time", ""),
-            "Hair Stylist": h_p or entry.get("hair_stylist", ""),
-            "Hair Time": f"{h_s}–{h_e}" if h_s else "",
+            "Model":         entry["model"],
+            "Group":         entry["group"],
+            "Rehearsal":     entry.get("rehearsal_time", ""),
+            "Hair Stylist":  h_p or entry.get("hair_stylist", ""),
+            "Hair Time":     f"{h_s}–{h_e}" if h_s else "",
             "Makeup Artist": m_p or entry.get("makeup_artist", ""),
-            "Makeup Time": f"{m_s}–{m_e}" if m_s else "",
+            "Makeup Time":   f"{m_s}–{m_e}" if m_s else "",
             "Chair Massage": f"{cm_s}–{cm_e}" if cm_s else "",
-            "Portrait": f"{p_s}–{p_e}" if p_s else "",
-            "Hand Massage": f"{hm_s}–{hm_e}" if hm_s else "",
-            "Nails": f"{n_s}–{n_e}" if n_s else "",
+            "Portrait":      f"{p_s}–{p_e}" if p_s else "",
+            "Hand Massage":  f"{hm_s}–{hm_e}" if hm_s else "",
+            "Nails":         f"{n_s}–{n_e}" if n_s else "",
         })
     return rows
