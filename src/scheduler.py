@@ -250,51 +250,58 @@ class Scheduler:
         hair_end = massage_end
         if model.get("wants_hair", True):
             assigned_hair = model.get("assigned_hair_stylist", "")
-            # Build fallback list: assigned artist first, then others sorted by fewest bookings
-            fallbacks = [
+            all_hair = [
                 a_name for key in self.calendars
                 if key.startswith("hair::")
                 for a_name in [key[len("hair::"):]]
-                if a_name != assigned_hair
-                and self.artists.get(a_name, {}).get("role") in ("hair", "both")
+                if self.artists.get(a_name, {}).get("role") in ("hair", "both")
             ]
-            fallbacks.sort(key=lambda a: len(self.calendars[f"hair::{a}"].slots))
-            hair_candidates = (([assigned_hair] if assigned_hair and f"hair::{assigned_hair}" in self.calendars else [])
-                               + fallbacks)
-            for candidate in hair_candidates:
+            # Find earliest available slot across all artists; prefer assigned if within 30 min of best
+            best_slot, best_candidate = None, None
+            for candidate in all_hair:
                 slot = self._find_slot("hair", f"hair::{candidate}", massage_end, group_key, model_busy)
-                if slot:
-                    start, end = slot
-                    self._book("hair", f"hair::{candidate}", start, end, name)
-                    model_busy.append((start, end))
-                    appointments["hair"] = {"provider": candidate, "start": start, "end": end}
-                    hair_end = end
-                    break
+                if slot and (best_slot is None or slot[0] < best_slot[0]):
+                    best_slot, best_candidate = slot, candidate
+            # If assigned artist can serve within 30 min of the best slot, prefer them
+            if assigned_hair and f"hair::{assigned_hair}" in self.calendars and best_slot:
+                assigned_slot = self._find_slot("hair", f"hair::{assigned_hair}", massage_end, group_key, model_busy)
+                if assigned_slot and (assigned_slot[0] - best_slot[0]).total_seconds() <= 1800:
+                    best_slot, best_candidate = assigned_slot, assigned_hair
+            if best_slot:
+                start, end = best_slot
+                self._book("hair", f"hair::{best_candidate}", start, end, name)
+                model_busy.append((start, end))
+                appointments["hair"] = {"provider": best_candidate, "start": start, "end": end}
+                hair_end = end
 
         # ── 3. Makeup (after hair) ─────────────────────────────────────────────
         makeup_end = hair_end
         if model.get("wants_makeup", True):
             assigned_mu = model.get("assigned_makeup_artist", "")
             booked_hair = appointments.get("hair", {}).get("provider", "")
-            fallbacks = [
+            all_makeup = [
                 a_name for key in self.calendars
                 if key.startswith("makeup::")
                 for a_name in [key[len("makeup::"):]]
-                if a_name != assigned_mu and a_name != booked_hair
+                if a_name != booked_hair
                 and self.artists.get(a_name, {}).get("role") in ("makeup", "both")
             ]
-            fallbacks.sort(key=lambda a: len(self.calendars[f"makeup::{a}"].slots))
-            makeup_candidates = (([assigned_mu] if assigned_mu and f"makeup::{assigned_mu}" in self.calendars else [])
-                                 + fallbacks)
-            for candidate in makeup_candidates:
+            # Find earliest available slot across all artists; prefer assigned if within 30 min of best
+            best_slot, best_candidate = None, None
+            for candidate in all_makeup:
                 slot = self._find_slot("makeup", f"makeup::{candidate}", hair_end, group_key, model_busy)
-                if slot:
-                    start, end = slot
-                    self._book("makeup", f"makeup::{candidate}", start, end, name)
-                    model_busy.append((start, end))
-                    appointments["makeup"] = {"provider": candidate, "start": start, "end": end}
-                    makeup_end = end
-                    break
+                if slot and (best_slot is None or slot[0] < best_slot[0]):
+                    best_slot, best_candidate = slot, candidate
+            if assigned_mu and f"makeup::{assigned_mu}" in self.calendars and best_slot:
+                assigned_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", hair_end, group_key, model_busy)
+                if assigned_slot and (assigned_slot[0] - best_slot[0]).total_seconds() <= 1800:
+                    best_slot, best_candidate = assigned_slot, assigned_mu
+            if best_slot:
+                start, end = best_slot
+                self._book("makeup", f"makeup::{best_candidate}", start, end, name)
+                model_busy.append((start, end))
+                appointments["makeup"] = {"provider": best_candidate, "start": start, "end": end}
+                makeup_end = end
 
         # ── 4. Portrait (after hair + makeup, within portrait window) ──────────
         glam_done = max(hair_end, makeup_end)
