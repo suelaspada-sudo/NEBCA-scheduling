@@ -168,6 +168,12 @@ def parse_models_master(path: str | Path) -> list[dict]:
         group_col = _safe_str(row.get("Group", ""))
         group = group_col if group_col else current_group
 
+        # Hair/Makeup columns in master sheet indicate if they want the service
+        hair_val = _safe_str(row.get("Hair", "")).lower()
+        makeup_val = _safe_str(row.get("Makeup", "")).lower()
+        wants_hair = not (hair_val in ("no", "maybe") or hair_val.startswith("no") or hair_val.startswith("maybe"))
+        wants_makeup = not (makeup_val in ("no", "maybe") or makeup_val.startswith("no") or makeup_val.startswith("maybe"))
+
         model = {
             "name": name,
             "email": _safe_str(row.get("E-mail", "")),
@@ -175,7 +181,10 @@ def parse_models_master(path: str | Path) -> list[dict]:
             "group": group,
             "rehearsal_time": current_rehearsal,
             "order": _safe_str(row.get("Order", row.get("#", ""))),
-            # pre-assigned glam (may be blank — app will fill these in)
+            # wants_hair/wants_makeup from master sheet (questionnaire may override later)
+            "wants_hair": wants_hair,
+            "wants_makeup": wants_makeup,
+            # pre-assigned glam — if filled in, skip matching for this model
             "assigned_hair_stylist": _safe_str(row.get("Hair Stylist Name", "")),
             "assigned_makeup_artist": _safe_str(row.get("Makeup Artist Name", "")),
             "hair_time_slot": _safe_str(row.get("Time Slot", "")),
@@ -332,17 +341,20 @@ def merge_model_data(models: list[dict], responses: list[dict]) -> list[dict]:
         resp = resp_by_name.get(name_lower) or resp_by_name.get(last)
 
         if resp:
+            # If master sheet already says No/Maybe, questionnaire cannot override to Yes
+            wants_hair = resp.get("wants_hair", True) and model.get("wants_hair", True)
+            wants_makeup = resp.get("wants_makeup", True) and model.get("wants_makeup", True)
             model.update({
-                "wants_hair": resp.get("wants_hair", True),
+                "wants_hair": wants_hair,
                 "hair_ideas": resp.get("hair_ideas", ""),
                 "hair_wig": resp.get("hair_wig", ""),
                 "hair_description": resp.get("hair_description", ""),
-                "wants_makeup": resp.get("wants_makeup", True),
+                "wants_makeup": wants_makeup,
                 "makeup_ideas": resp.get("makeup_ideas", ""),
                 "skin_sensitivities": resp.get("skin_sensitivities", ""),
                 "own_makeup": resp.get("own_makeup", ""),
                 "fake_lashes": resp.get("fake_lashes", ""),
-                "wants_nails": resp.get("wants_nails", False),
+                "wants_nails": resp.get("wants_nails", True),
                 "questions": resp.get("questions", ""),
             })
         else:

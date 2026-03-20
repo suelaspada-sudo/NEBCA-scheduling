@@ -126,6 +126,12 @@ def match_models_to_artists(
                     capacity[a["name"]] = max(0, capacity[a["name"]] - 1)
                     break
 
+    # Skip models who don't want this service — mark them as no-service
+    wants_key = "wants_hair" if role == "hair" else "wants_makeup"
+    for model in models:
+        if not model.get(wants_key, True) and model["name"] not in assignment:
+            assignment[model["name"]] = ""  # explicitly no service
+
     # Score all unassigned models against eligible artists
     unassigned = [m for m in models if m["name"] not in assignment]
 
