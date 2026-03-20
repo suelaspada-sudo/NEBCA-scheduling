@@ -100,24 +100,56 @@ def _safe_str(val) -> str:
 # ─── Models Master ────────────────────────────────────────────────────────────
 
 GROUP_ROW_PATTERNS = [
-    ("group1",           ["group 1", "group1"]),
-    ("group2",           ["group 2", "group2"]),
+    ("group1",           ["group 1", "group1", "runway part 1", "runway part1"]),
+    ("group2",           ["group 2", "group2", "runway part 2", "runway part2"]),
     ("hope_ambassador",  ["hope ambassador", "hope ambassadors", "hope amb"]),
-    ("board_member",     ["board member", "board members", "board"]),
+    ("board_member",     ["board member", "board members"]),
 ]
+
+# Keywords that indicate a row is a section/group header rather than a person
+_HEADER_KEYWORDS = ["rehearsal", "runway", "group", "ambassador", "board member"]
+
+# Suffixes that may be appended to a real person's name indicating their group
+_NAME_SUFFIXES = {
+    "board member": "board_member",
+    "board members": "board_member",
+    "hope ambassador": "hope_ambassador",
+    "hope ambassadors": "hope_ambassador",
+}
 
 
 def _detect_group_row(name: str) -> str | None:
     """
     Return group key if a row's Name cell is a group header rather than a person's name.
-    The master sheet uses rows like 'Group 1', 'Group 2', 'Hope Ambassadors' as dividers.
+    Catches explicit patterns AND rows that look like headers (contain rehearsal/runway keywords).
     """
     name_lower = name.lower().strip()
     for key, patterns in GROUP_ROW_PATTERNS:
         for p in patterns:
             if name_lower == p or name_lower.startswith(p):
                 return key
+    # Catch-all: rows containing rehearsal time patterns are always headers
+    if re.search(r'\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}', name_lower):
+        # Determine group from content
+        if "part 1" in name_lower or "group 1" in name_lower:
+            return "group1"
+        if "part 2" in name_lower or "group 2" in name_lower:
+            return "group2"
+        return "group1"  # default if unknown
     return None
+
+
+def _strip_name_suffix(name: str) -> tuple[str, str | None]:
+    """
+    If a name has a group suffix like 'board member' appended, strip it and return
+    (clean_name, group_key). Otherwise return (name, None).
+    """
+    name_lower = name.lower().strip()
+    for suffix, group_key in _NAME_SUFFIXES.items():
+        if name_lower.endswith(suffix):
+            clean = name[:-(len(suffix))].strip().rstrip(",").strip()
+            return clean, group_key
+    return name, None
 
 
 def _extract_rehearsal_time(row: pd.Series) -> str:
@@ -165,9 +197,12 @@ def parse_models_master(path: str | Path) -> list[dict]:
             current_rehearsal = _extract_rehearsal_time(row)
             continue
 
-        # Use explicit Group column if present, otherwise use tracked group
+        # Strip group suffixes from name (e.g. "Cassia Leach board member")
+        name, suffix_group = _strip_name_suffix(name)
+
+        # Use explicit Group column if present, then suffix, then tracked group
         group_col = _safe_str(row.get("Group", ""))
-        group = group_col if group_col else current_group
+        group = group_col if group_col else (suffix_group or current_group)
 
         # Hair/Makeup columns in master sheet indicate if they want the service
         hair_val = _safe_str(row.get("Hair", "")).lower()
@@ -199,20 +234,26 @@ def parse_models_master(path: str | Path) -> list[dict]:
 
 # ─── Glam Info ────────────────────────────────────────────────────────────────
 
-# Section header rows in the glam sheet that indicate which service follows
-GLAM_SECTION_PATTERNS = {
-    "hair":   ["hair stylist", "hair stylists", "hair only", "stylists"],
-    "makeup": ["makeup artist", "makeup artists", "makeup only"],
-    "both":   ["hair and makeup", "hair & makeup", "both", "hair/makeup"],
-}
+# Section header rows in the glam sheet (First Name cell only, Last Name empty)
+# Check "both" patterns before "hair" so "Hair & Makeup" doesn't match "hair" first
+GLAM_SECTION_PATTERNS = [
+    ("both",   ["hair & makeup", "hair and makeup", "hair/makeup", "both"]),
+    ("hair",   ["hair stylists", "hair stylist", "hair only", "hair"]),
+    ("makeup", ["makeup artists", "makeup artist", "makeup only", "makeup"]),
+]
 
 
-def _detect_glam_section(name: str) -> str | None:
-    """Return role key if the First Name cell looks like a section header."""
-    name_lower = name.lower().strip()
-    for role, patterns in GLAM_SECTION_PATTERNS.items():
+def _detect_glam_section(first: str, last: str) -> str | None:
+    """
+    Return role if the row looks like a section header.
+    Headers have text only in First Name (Last Name is blank).
+    """
+    if last.strip():
+        return None  # real person has a last name
+    first_lower = first.lower().strip()
+    for role, patterns in GLAM_SECTION_PATTERNS:
         for p in patterns:
-            if name_lower == p or name_lower.startswith(p):
+            if first_lower == p or first_lower.startswith(p):
                 return role
     return None
 
@@ -251,7 +292,7 @@ def parse_glam_info(path: str | Path) -> list[dict]:
             continue
 
         # Check if this row is a section header (e.g. "Hair Stylists", "Makeup Artists")
-        section = _detect_glam_section(first)
+        section = _detect_glam_section(first, last)
         if section:
             current_section_role = section
             continue
