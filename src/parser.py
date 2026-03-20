@@ -99,9 +99,35 @@ def _safe_str(val) -> str:
 
 # ─── Models Master ────────────────────────────────────────────────────────────
 
+GROUP_ROW_PATTERNS = [
+    ("group1",           ["group 1", "group1"]),
+    ("group2",           ["group 2", "group2"]),
+    ("hope_ambassador",  ["hope ambassador", "hope ambassadors", "hope amb"]),
+]
+
+
+def _detect_group_row(name: str) -> str | None:
+    """
+    Return group key if a row's Name cell is a group header rather than a person's name.
+    The master sheet uses rows like 'Group 1', 'Group 2', 'Hope Ambassadors' as dividers.
+    """
+    name_lower = name.lower().strip()
+    for key, patterns in GROUP_ROW_PATTERNS:
+        for p in patterns:
+            if name_lower == p or name_lower.startswith(p):
+                return key
+    return None
+
+
 def parse_models_master(path: str | Path) -> list[dict]:
     """
     Returns list of model dicts with pre-assigned glam info (if any).
+
+    Handles two group formats:
+      - A dedicated 'Group' column per row
+      - Group header rows interspersed (e.g. a row where Name = 'Group 1')
+        — the current group is tracked and applied to all following model rows.
+
     Duplicate column names (Email, Phone, Time Slot, Notes appear twice)
     are handled by pandas auto-renaming to .1 suffix.
     """
@@ -109,17 +135,28 @@ def parse_models_master(path: str | Path) -> list[dict]:
     df.columns = [c.strip() for c in df.columns]
 
     models = []
+    current_group = ""
+
     for _, row in df.iterrows():
         name = _safe_str(row.get("Name", ""))
         if not name:
             continue
 
+        # Check if this row is a group header rather than a model
+        group_from_row = _detect_group_row(name)
+        if group_from_row:
+            current_group = group_from_row
+            continue
+
+        # Use explicit Group column if present, otherwise use tracked group
+        group_col = _safe_str(row.get("Group", ""))
+        group = group_col if group_col else current_group
+
         model = {
             "name": name,
             "email": _safe_str(row.get("E-mail", "")),
             "phone": _safe_str(row.get("Phone #", "")),
-            # group is inferred from name order / separate column if present
-            "group": _safe_str(row.get("Group", "")),
+            "group": group,
             "order": _safe_str(row.get("Order", row.get("#", ""))),
             # pre-assigned glam (may be blank — app will fill these in)
             "assigned_hair_stylist": _safe_str(row.get("Hair Stylist Name", "")),

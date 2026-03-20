@@ -274,13 +274,13 @@ class Scheduler:
                     }
                     hair_end = end
 
-        # ── 3. Makeup ──────────────────────────────────────────────────────────
-        makeup_end = massage_end
+        # ── 3. Makeup (must start after hair is done) ─────────────────────────
+        makeup_end = hair_end
         if model.get("wants_makeup", True):
             makeup_artist = model.get("assigned_makeup_artist", "")
             makeup_key = f"makeup::{makeup_artist}"
             if makeup_key in self.calendars:
-                slot = self._find_slot("makeup", makeup_key, massage_end, group_key)
+                slot = self._find_slot("makeup", makeup_key, hair_end, group_key)
                 if slot:
                     start, end = slot
                     self._book("makeup", makeup_key, start, end, name)

@@ -112,7 +112,7 @@ def _load_config() -> dict:
         with open(config_path) as f:
             return json.load(f)
     return {
-        "event_date": "2026-01-01",
+        "event_date": "2026-04-25",
         "num_massage_tables": 2,
         "num_hand_massage_tables": 2,
         "num_nail_stations": 2,
