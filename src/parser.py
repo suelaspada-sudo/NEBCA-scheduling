@@ -199,8 +199,26 @@ def parse_models_master(path: str | Path) -> list[dict]:
 
 # ─── Glam Info ────────────────────────────────────────────────────────────────
 
+# Section header rows in the glam sheet that indicate which service follows
+GLAM_SECTION_PATTERNS = {
+    "hair":   ["hair stylist", "hair stylists", "hair only", "stylists"],
+    "makeup": ["makeup artist", "makeup artists", "makeup only"],
+    "both":   ["hair and makeup", "hair & makeup", "both", "hair/makeup"],
+}
+
+
+def _detect_glam_section(name: str) -> str | None:
+    """Return role key if the First Name cell looks like a section header."""
+    name_lower = name.lower().strip()
+    for role, patterns in GLAM_SECTION_PATTERNS.items():
+        for p in patterns:
+            if name_lower == p or name_lower.startswith(p):
+                return role
+    return None
+
+
 def _determine_role(row: pd.Series) -> str:
-    """Infer whether artist does Hair, Makeup, or Both."""
+    """Infer whether artist does Hair, Makeup, or Both from filled columns."""
     hair_uncomfortable = _safe_str(row.get("Looks uncomfortable with? [HAIR]", ""))
     makeup_uncomfortable = _safe_str(row.get("Looks uncomfortable with? [MAKEUP]", ""))
     hair_supplies = _safe_str(row.get("Bring own supplies? [HAIR]", ""))
@@ -224,10 +242,18 @@ def parse_glam_info(path: str | Path) -> list[dict]:
     df.columns = [c.strip() for c in df.columns]
 
     artists = []
+    current_section_role: str | None = None  # set when a section header row is found
+
     for _, row in df.iterrows():
         first = _safe_str(row.get("First Name", ""))
         last = _safe_str(row.get("Last Name", ""))
         if not first and not last:
+            continue
+
+        # Check if this row is a section header (e.g. "Hair Stylists", "Makeup Artists")
+        section = _detect_glam_section(first)
+        if section:
+            current_section_role = section
             continue
 
         pref_count = _safe_str(row.get("# models preference", ""))
@@ -235,6 +261,9 @@ def parse_glam_info(path: str | Path) -> list[dict]:
             max_models = int(re.search(r"\d+", pref_count).group()) if pref_count else 6
         except AttributeError:
             max_models = 6
+
+        # Role: use section header if available, otherwise infer from filled columns
+        role = current_section_role if current_section_role else _determine_role(row)
 
         artist = {
             "name": f"{first} {last}".strip(),
@@ -252,7 +281,7 @@ def parse_glam_info(path: str | Path) -> list[dict]:
             "makeup_own_supplies": _safe_str(row.get("Bring own supplies? [MAKEUP]", "")),
             "info_from_models": _safe_str(row.get("Info you want to know from models?", "")),
             "links": _safe_str(row.get("Links", "")),
-            "role": _determine_role(row),
+            "role": role,
             # scheduling state (filled in by scheduler)
             "assigned_models": [],
         }
