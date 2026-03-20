@@ -252,18 +252,23 @@ GLAM_SECTION_PATTERNS = [
 ]
 
 
-def _detect_glam_section(first: str, last: str) -> str | None:
+def _detect_glam_section_row(row: pd.Series) -> str | None:
     """
-    Return role if the row looks like a section header.
-    Headers have text only in First Name (Last Name is blank).
+    Scan ALL cells in a row for a section header label.
+    The label may be in any column (Google Sheets export can place it in col A
+    which becomes 'Unnamed: 0', not 'First Name').
+    A row is a section header if one cell matches a label AND the row has
+    very few non-empty cells (no email, no cell number, etc.).
     """
-    if last.strip():
-        return None  # real person has a last name
-    first_lower = first.lower().strip()
-    for role, patterns in GLAM_SECTION_PATTERNS:
-        for p in patterns:
-            if first_lower == p or first_lower.startswith(p):
-                return role
+    non_empty = [str(v).strip() for v in row.values if not pd.isna(v) and str(v).strip()]
+    if len(non_empty) > 3:
+        return None  # too many values — this is a real artist row
+    for text in non_empty:
+        t = text.lower().strip()
+        for role, patterns in GLAM_SECTION_PATTERNS:
+            for p in patterns:
+                if t == p or t.startswith(p):
+                    return role
     return None
 
 
@@ -300,8 +305,8 @@ def parse_glam_info(path: str | Path) -> list[dict]:
         if not first and not last:
             continue
 
-        # Check if this row is a section header (e.g. "Hair Stylists", "Makeup Artists")
-        section = _detect_glam_section(first, last)
+        # Check if this row is a section header (e.g. "Makeup", "Hair", "Hair & Makeup")
+        section = _detect_glam_section_row(row)
         if section:
             current_section_role = section
             continue
