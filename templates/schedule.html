@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h2>Master Schedule — {{ rows|length }} Models</h2>
+    <div style="display:flex;gap:8px;">
+      <a href="/export/wix" class="btn btn-success">⬇ Wix CSV</a>
+      <a href="/export/master" class="btn btn-secondary">⬇ Master CSV</a>
+    </div>
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Group</th>
+          <th>Hair Stylist</th>
+          <th>Hair Time</th>
+          <th>Makeup Artist</th>
+          <th>Makeup Time</th>
+          <th>Chair Massage</th>
+          <th>Portrait</th>
+          <th>Hand Massage</th>
+          <th>Nails</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td><strong>{{ row.Model }}</strong></td>
+          <td>
+            {% if row.Group %}
+              <span class="badge badge-gray">{{ row.Group }}</span>
+            {% endif %}
+          </td>
+          <td>{{ row["Hair Stylist"] }}</td>
+          <td>
+            {% if row["Hair Start"] %}
+              <span class="badge badge-blue">{{ row["Hair Start"] }}–{{ row["Hair End"] }}</span>
+            {% else %}<span style="color:#aaa">—</span>{% endif %}
+          </td>
+          <td>{{ row["Makeup Artist"] }}</td>
+          <td>
+            {% if row["Makeup Start"] %}
+              <span class="badge badge-blue">{{ row["Makeup Start"] }}–{{ row["Makeup End"] }}</span>
+            {% else %}<span style="color:#aaa">—</span>{% endif %}
+          </td>
+          <td>
+            {% if row["Chair Massage Start"] %}
+              <span class="badge badge-orange">{{ row["Chair Massage Start"] }}–{{ row["Chair Massage End"] }}</span>
+            {% else %}<span style="color:#aaa">—</span>{% endif %}
+          </td>
+          <td>
+            {% if row["Portrait Start"] %}
+              <span class="badge badge-green">{{ row["Portrait Start"] }}–{{ row["Portrait End"] }}</span>
+            {% else %}<span style="color:#aaa;font-size:0.7rem">not scheduled</span>{% endif %}
+          </td>
+          <td>
+            {% if row["Hand Massage Start"] %}
+              <span class="badge badge-orange">{{ row["Hand Massage Start"] }}–{{ row["Hand Massage End"] }}</span>
+            {% else %}<span style="color:#aaa">—</span>{% endif %}
+          </td>
+          <td>
+            {% if row["Nails Start"] %}
+              <span class="badge badge-blue">{{ row["Nails Start"] }}–{{ row["Nails End"] }}</span>
+            {% else %}<span style="color:#aaa">—</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" style="text-align:center;color:#aaa;padding:32px;">No schedule generated yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Provider Summary -->
+{% if schedule %}
+<div class="card">
+  <h2>Provider Load Summary</h2>
+  <p style="font-size:0.82rem;color:#555;margin-bottom:16px;">
+    How many models each glam artist is assigned to.
+  </p>
+  <table style="max-width:600px;">
+    <tr><th>Artist</th><th>Role</th><th>Models Assigned</th></tr>
+    {% set artist_counts = {} %}
+    {% for entry in schedule %}
+      {% set hair = entry.hair_stylist %}
+      {% set makeup = entry.makeup_artist %}
+      {% if hair %}
+        {% if hair not in artist_counts %}{% set _ = artist_counts.update({hair: {'hair': 0, 'makeup': 0}}) %}{% endif %}
+        {% set _ = artist_counts[hair].__setitem__('hair', artist_counts[hair]['hair'] + 1) %}
+      {% endif %}
+      {% if makeup %}
+        {% if makeup not in artist_counts %}{% set _ = artist_counts.update({makeup: {'hair': 0, 'makeup': 0}}) %}{% endif %}
+        {% set _ = artist_counts[makeup].__setitem__('makeup', artist_counts[makeup]['makeup'] + 1) %}
+      {% endif %}
+    {% endfor %}
+    {% for artist_name, counts in artist_counts.items() %}
+      {% if counts.hair > 0 %}
+        <tr>
+          <td>{{ artist_name }}</td>
+          <td><span class="badge badge-blue">Hair</span></td>
+          <td>{{ counts.hair }} models</td>
+        </tr>
+      {% endif %}
+      {% if counts.makeup > 0 %}
+        <tr>
+          <td>{{ artist_name }}</td>
+          <td><span class="badge badge-orange">Makeup</span></td>
+          <td>{{ counts.makeup }} models</td>
+        </tr>
+      {% endif %}
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

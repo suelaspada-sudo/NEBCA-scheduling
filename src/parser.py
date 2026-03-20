@@ -1,0 +1,303 @@
+"""
+Parsers for the 3 input CSVs:
+  1. models_master  - Glams Master / Models Master Schedule
+  2. glam_info      - 2026 Glam Info (hair + makeup artists)
+  3. questionnaire  - R4H 2026 Model & HA Questionnaire responses
+"""
+
+import pandas as pd
+import re
+from pathlib import Path
+
+
+# ─── Column aliases ───────────────────────────────────────────────────────────
+
+MODELS_MASTER_COLS = {
+    "name": "Name",
+    "email": "E-mail",
+    "phone": "Phone #",
+    "hair": "Hair",
+    "hair_stylist_name": "Hair Stylist Name",
+    "hair_stylist_email": "Email",        # first Email after Hair block
+    "hair_stylist_phone": "Phone",        # first Phone after Hair block
+    "hair_time_slot": "Time Slot",
+    "hair_notes": "Notes",
+    "makeup": "Makeup",
+    "makeup_artist_name": "Makeup Artist Name",
+    "makeup_artist_email": "Email.1",
+    "makeup_artist_phone": "Phone.1",
+    "makeup_time_slot": "Time Slot.1",
+    "makeup_notes": "Notes.1",
+}
+
+GLAM_INFO_COLS = {
+    "first_name": "First Name",
+    "last_name": "Last Name",
+    "business": "Business Name",
+    "email": "Email",
+    "cell": "Cell",
+    "veteran_new": "Veteran/New",
+    "street": "Street",
+    "city": "City/Town",
+    "state": "State",
+    "zip": "Zip",
+    "referral": "Referral",
+    "styling_pref": "Styling preference",
+    "model_count_pref": "# models preference",
+    "hair_uncomfortable": "Looks uncomfortable with? [HAIR]",
+    "hair_own_supplies": "Bring own supplies? [HAIR]",
+    "makeup_uncomfortable": "Looks uncomfortable with? [MAKEUP]",
+    "makeup_own_supplies": "Bring own supplies? [MAKEUP]",
+    "info_from_models": "Info you want to know from models?",
+    "links": "Links",
+}
+
+# Questionnaire columns (abbreviated keys → partial column name match)
+Q_COL_MAP = {
+    "timestamp": "Timestamp",
+    "first_name": "First name:",
+    "last_name": "Last name:",
+    "email": "Email:",
+    "phone": "Phone number:",
+    "street": "Street address:",
+    "city": "City/town:",
+    "state": "State:",
+    "zip": "Zip code:",
+    "costume_designer": "costume designer",
+    "costume_desc": "describe the costume",
+    "hair_service": "hair__ to be styled",
+    "hair_own_stylist_info": "bringing someone to do your hair",
+    "hair_ideas": "ideas for your hair",
+    "hair_wig": "wear a wig",
+    "hair_description": "describe your hair",
+    "makeup_service": "makeup__ to be done",
+    "makeup_own_artist_info": "bringing someone to do your makeup",
+    "makeup_ideas": "ideas for your makeup",
+    "skin_sensitivities": "skin sensitiv",
+    "medications": "medications",
+    "own_makeup": "own makeup",
+    "fake_lashes": "fake eye lashes",
+    "nails_stamping": "nails stamped",
+    "questions": "initial questions",
+}
+
+
+def _find_col(df: pd.DataFrame, partial: str) -> str | None:
+    """Return the first column whose name contains `partial` (case-insensitive)."""
+    partial_lower = partial.lower()
+    for col in df.columns:
+        if partial_lower in col.lower():
+            return col
+    return None
+
+
+def _safe_str(val) -> str:
+    if pd.isna(val):
+        return ""
+    return str(val).strip()
+
+
+# ─── Models Master ────────────────────────────────────────────────────────────
+
+def parse_models_master(path: str | Path) -> list[dict]:
+    """
+    Returns list of model dicts with pre-assigned glam info (if any).
+    Duplicate column names (Email, Phone, Time Slot, Notes appear twice)
+    are handled by pandas auto-renaming to .1 suffix.
+    """
+    df = pd.read_csv(path, dtype=str)
+    df.columns = [c.strip() for c in df.columns]
+
+    models = []
+    for _, row in df.iterrows():
+        name = _safe_str(row.get("Name", ""))
+        if not name:
+            continue
+
+        model = {
+            "name": name,
+            "email": _safe_str(row.get("E-mail", "")),
+            "phone": _safe_str(row.get("Phone #", "")),
+            # group is inferred from name order / separate column if present
+            "group": _safe_str(row.get("Group", "")),
+            "order": _safe_str(row.get("Order", row.get("#", ""))),
+            # pre-assigned glam (may be blank — app will fill these in)
+            "assigned_hair_stylist": _safe_str(row.get("Hair Stylist Name", "")),
+            "assigned_makeup_artist": _safe_str(row.get("Makeup Artist Name", "")),
+            "hair_time_slot": _safe_str(row.get("Time Slot", "")),
+            "makeup_time_slot": _safe_str(row.get("Time Slot.1", "")),
+            "hair_notes": _safe_str(row.get("Notes", "")),
+            "makeup_notes": _safe_str(row.get("Notes.1", "")),
+        }
+        models.append(model)
+    return models
+
+
+# ─── Glam Info ────────────────────────────────────────────────────────────────
+
+def _determine_role(row: pd.Series) -> str:
+    """Infer whether artist does Hair, Makeup, or Both."""
+    hair_uncomfortable = _safe_str(row.get("Looks uncomfortable with? [HAIR]", ""))
+    makeup_uncomfortable = _safe_str(row.get("Looks uncomfortable with? [MAKEUP]", ""))
+    hair_supplies = _safe_str(row.get("Bring own supplies? [HAIR]", ""))
+    makeup_supplies = _safe_str(row.get("Bring own supplies? [MAKEUP]", ""))
+
+    does_hair = bool(hair_supplies or hair_uncomfortable)
+    does_makeup = bool(makeup_supplies or makeup_uncomfortable)
+
+    if does_hair and does_makeup:
+        return "both"
+    if does_hair:
+        return "hair"
+    if does_makeup:
+        return "makeup"
+    return "both"  # default: assume both
+
+
+def parse_glam_info(path: str | Path) -> list[dict]:
+    """Returns list of glam-artist dicts."""
+    df = pd.read_csv(path, dtype=str)
+    df.columns = [c.strip() for c in df.columns]
+
+    artists = []
+    for _, row in df.iterrows():
+        first = _safe_str(row.get("First Name", ""))
+        last = _safe_str(row.get("Last Name", ""))
+        if not first and not last:
+            continue
+
+        pref_count = _safe_str(row.get("# models preference", ""))
+        try:
+            max_models = int(re.search(r"\d+", pref_count).group()) if pref_count else 6
+        except AttributeError:
+            max_models = 6
+
+        artist = {
+            "name": f"{first} {last}".strip(),
+            "first_name": first,
+            "last_name": last,
+            "business": _safe_str(row.get("Business Name", "")),
+            "email": _safe_str(row.get("Email", "")),
+            "cell": _safe_str(row.get("Cell", "")),
+            "veteran_new": _safe_str(row.get("Veteran/New", "")),
+            "styling_pref": _safe_str(row.get("Styling preference", "")),
+            "max_models": max_models,
+            "hair_uncomfortable": _safe_str(row.get("Looks uncomfortable with? [HAIR]", "")),
+            "hair_own_supplies": _safe_str(row.get("Bring own supplies? [HAIR]", "")),
+            "makeup_uncomfortable": _safe_str(row.get("Looks uncomfortable with? [MAKEUP]", "")),
+            "makeup_own_supplies": _safe_str(row.get("Bring own supplies? [MAKEUP]", "")),
+            "info_from_models": _safe_str(row.get("Info you want to know from models?", "")),
+            "links": _safe_str(row.get("Links", "")),
+            "role": _determine_role(row),
+            # scheduling state (filled in by scheduler)
+            "assigned_models": [],
+        }
+        artists.append(artist)
+    return artists
+
+
+# ─── Questionnaire ───────────────────────────────────────────────────────────
+
+def parse_questionnaire(path: str | Path) -> list[dict]:
+    """Returns list of participant preference dicts."""
+    df = pd.read_csv(path, dtype=str)
+    df.columns = [c.strip() for c in df.columns]
+
+    def gcol(partial):
+        return _find_col(df, partial)
+
+    responses = []
+    for _, row in df.iterrows():
+        first_col = gcol("First name")
+        last_col = gcol("Last name")
+        if not first_col:
+            continue
+
+        first = _safe_str(row.get(first_col, ""))
+        last = _safe_str(row.get(last_col, "")) if last_col else ""
+        if not first:
+            continue
+
+        def g(partial):
+            col = gcol(partial)
+            return _safe_str(row[col]) if col and col in row else ""
+
+        hair_service_val = g("hair__ to be styled")
+        # "Yes" / "No, I am bringing..." / "No, I am doing it myself"
+        wants_hair = hair_service_val.lower().startswith("yes") if hair_service_val else True
+
+        makeup_service_val = g("makeup__ to be done")
+        wants_makeup = makeup_service_val.lower().startswith("yes") if makeup_service_val else True
+
+        nails_val = g("nails stamped")
+        wants_nails = nails_val.lower().startswith("yes") if nails_val else False
+
+        response = {
+            "first_name": first,
+            "last_name": last,
+            "full_name": f"{first} {last}".strip(),
+            "email": g("Email:"),
+            "phone": g("Phone number:"),
+            "costume_desc": g("describe the costume"),
+            "wants_hair": wants_hair,
+            "hair_ideas": g("ideas for your hair"),
+            "hair_wig": g("wear a wig"),
+            "hair_description": g("describe your hair"),
+            "wants_makeup": wants_makeup,
+            "makeup_ideas": g("ideas for your makeup"),
+            "skin_sensitivities": g("skin sensitiv"),
+            "medications": g("medications"),
+            "own_makeup": g("own makeup"),
+            "fake_lashes": g("fake eye lashes"),
+            "wants_nails": wants_nails,
+            "questions": g("initial questions"),
+        }
+        responses.append(response)
+    return responses
+
+
+# ─── Merge: attach questionnaire data to models ───────────────────────────────
+
+def merge_model_data(models: list[dict], responses: list[dict]) -> list[dict]:
+    """
+    Join questionnaire responses onto the models list by name (fuzzy last-name match).
+    Adds preference fields directly to each model dict.
+    """
+    resp_by_name = {}
+    for r in responses:
+        key = r["full_name"].lower().strip()
+        resp_by_name[key] = r
+        # also index by last name alone for fallback
+        if r["last_name"]:
+            resp_by_name[r["last_name"].lower().strip()] = r
+
+    for model in models:
+        name_lower = model["name"].lower().strip()
+        # try full name first, then last name
+        last = name_lower.split()[-1] if name_lower else ""
+        resp = resp_by_name.get(name_lower) or resp_by_name.get(last)
+
+        if resp:
+            model.update({
+                "wants_hair": resp.get("wants_hair", True),
+                "hair_ideas": resp.get("hair_ideas", ""),
+                "hair_wig": resp.get("hair_wig", ""),
+                "hair_description": resp.get("hair_description", ""),
+                "wants_makeup": resp.get("wants_makeup", True),
+                "makeup_ideas": resp.get("makeup_ideas", ""),
+                "skin_sensitivities": resp.get("skin_sensitivities", ""),
+                "own_makeup": resp.get("own_makeup", ""),
+                "fake_lashes": resp.get("fake_lashes", ""),
+                "wants_nails": resp.get("wants_nails", False),
+                "questions": resp.get("questions", ""),
+            })
+        else:
+            model.setdefault("wants_hair", True)
+            model.setdefault("wants_makeup", True)
+            model.setdefault("wants_nails", False)
+            model.setdefault("hair_ideas", "")
+            model.setdefault("makeup_ideas", "")
+            model.setdefault("hair_description", "")
+            model.setdefault("skin_sensitivities", "")
+
+    return models

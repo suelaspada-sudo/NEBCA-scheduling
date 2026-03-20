@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h2>Glam Artists — {{ artists|length }} Loaded</h2>
+    <a href="/" class="btn btn-secondary">← Back</a>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Role</th>
+        <th>Veteran/New</th>
+        <th>Max Models</th>
+        <th>Styling Preference</th>
+        <th>Uncomfortable With</th>
+        <th>Contact</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in artists %}
+      <tr>
+        <td>
+          <strong>{{ a.name }}</strong>
+          {% if a.business %}<br><span style="color:#888;font-size:0.72rem">{{ a.business }}</span>{% endif %}
+        </td>
+        <td>
+          {% if a.role == 'hair' %}
+            <span class="badge badge-blue">Hair</span>
+          {% elif a.role == 'makeup' %}
+            <span class="badge badge-orange">Makeup</span>
+          {% else %}
+            <span class="badge badge-green">Both</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if a.veteran_new %}
+            <span class="badge {{ 'badge-green' if 'veteran' in a.veteran_new.lower() else 'badge-gray' }}">
+              {{ a.veteran_new }}
+            </span>
+          {% endif %}
+        </td>
+        <td style="text-align:center;">{{ a.max_models }}</td>
+        <td style="font-size:0.78rem;max-width:200px;">{{ a.styling_pref or '—' }}</td>
+        <td style="font-size:0.78rem;max-width:180px;">
+          {% if a.hair_uncomfortable %}
+            <span style="color:#9a3412">Hair: {{ a.hair_uncomfortable }}</span><br>
+          {% endif %}
+          {% if a.makeup_uncomfortable %}
+            <span style="color:#9a3412">MU: {{ a.makeup_uncomfortable }}</span>
+          {% endif %}
+          {% if not a.hair_uncomfortable and not a.makeup_uncomfortable %}—{% endif %}
+        </td>
+        <td style="font-size:0.78rem;">
+          {% if a.email %}<div>{{ a.email }}</div>{% endif %}
+          {% if a.cell %}<div>{{ a.cell }}</div>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="text-align:center;color:#aaa;padding:32px;">No artists loaded. Upload Glam Info CSV from the home page.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

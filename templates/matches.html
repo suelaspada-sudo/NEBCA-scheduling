@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h2>Glam Matches — {{ report|length }} Models</h2>
+    <a href="/" class="btn btn-secondary">← Back</a>
+  </div>
+
+  <p style="font-size:0.82rem;color:#555;margin-bottom:16px;">
+    Match scores: <strong>1.0</strong> = perfect style overlap, <strong>0.5</strong> = neutral (no preference data),
+    <strong>0.0</strong> = conflict. Click <em>Override</em> to manually reassign.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Model</th>
+        <th>Group</th>
+        <th>Model Style Keywords</th>
+        <th>Hair Stylist</th>
+        <th>Hair Score</th>
+        <th>Makeup Artist</th>
+        <th>Makeup Score</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in report %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td><strong>{{ row.model }}</strong></td>
+        <td>
+          {% if row.model in models|map(attribute='name')|list %}
+            {% for m in models %}
+              {% if m.name == row.model %}
+                <span class="badge badge-gray">{{ m.group or '—' }}</span>
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        </td>
+        <td>
+          {% for kw in row.model_styles %}
+            <span class="badge badge-blue">{{ kw }}</span>
+          {% else %}
+            <span style="color:#aaa;font-size:0.75rem">none detected</span>
+          {% endfor %}
+        </td>
+        <td>{{ row.hair_stylist }}</td>
+        <td>
+          {% set s = row.hair_match_score %}
+          {% if s == 'n/a' %}
+            <span class="badge badge-gray">n/a</span>
+          {% elif s >= 0.7 %}
+            <span class="badge badge-green">{{ s }}</span>
+          {% elif s >= 0.3 %}
+            <span class="badge badge-orange">{{ s }}</span>
+          {% else %}
+            <span class="badge" style="background:#fee2e2;color:#991b1b;">{{ s }}</span>
+          {% endif %}
+        </td>
+        <td>{{ row.makeup_artist }}</td>
+        <td>
+          {% set s = row.makeup_match_score %}
+          {% if s == 'n/a' %}
+            <span class="badge badge-gray">n/a</span>
+          {% elif s >= 0.7 %}
+            <span class="badge badge-green">{{ s }}</span>
+          {% elif s >= 0.3 %}
+            <span class="badge badge-orange">{{ s }}</span>
+          {% else %}
+            <span class="badge" style="background:#fee2e2;color:#991b1b;">{{ s }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <button onclick="toggleOverride('{{ loop.index }}')" class="btn btn-secondary" style="padding:4px 10px;font-size:0.75rem;">Override</button>
+          <form id="override-{{ loop.index }}" method="POST" action="/matches/override" style="display:none;margin-top:8px;">
+            <input type="hidden" name="model_name" value="{{ row.model }}">
+            <input type="text" name="hair_stylist" placeholder="Hair stylist name" value="{{ row.hair_stylist }}" style="margin-bottom:4px;font-size:0.75rem;padding:4px 8px;">
+            <input type="text" name="makeup_artist" placeholder="Makeup artist name" value="{{ row.makeup_artist }}" style="margin-bottom:4px;font-size:0.75rem;padding:4px 8px;">
+            <button type="submit" class="btn btn-primary" style="padding:4px 10px;font-size:0.75rem;">Save</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" style="text-align:center;color:#aaa;padding:32px;">No matches yet. Run matching from the home page.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function toggleOverride(id) {
+  const form = document.getElementById('override-' + id);
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+}
+</script>
+
+{% endblock %}
