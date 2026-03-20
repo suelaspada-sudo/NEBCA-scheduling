@@ -334,12 +334,9 @@ def schedule_to_rows(schedule: list[dict]) -> list[dict]:
             a = appts.get(key, {})
             return fmt_time(a.get("start")), fmt_time(a.get("end")), a.get("provider", "")
 
-        cm_s, cm_e, _ = appt("chair_massage")
         h_s,  h_e,  h_p  = appt("hair")
         m_s,  m_e,  m_p  = appt("makeup")
         p_s,  p_e,  _    = appt("portrait")
-        hm_s, hm_e, _    = appt("hand_massage")
-        n_s,  n_e,  _    = appt("nail_stamping")
 
         rows.append({
             "Model":         entry["model"],
@@ -349,9 +346,6 @@ def schedule_to_rows(schedule: list[dict]) -> list[dict]:
             "Hair Time":     f"{h_s}–{h_e}" if h_s else "",
             "Makeup Artist": m_p or entry.get("makeup_artist", ""),
             "Makeup Time":   f"{m_s}–{m_e}" if m_s else "",
-            "Chair Massage": f"{cm_s}–{cm_e}" if cm_s else "",
             "Portrait":      f"{p_s}–{p_e}" if p_s else "",
-            "Hand Massage":  f"{hm_s}–{hm_e}" if hm_s else "",
-            "Nails":         f"{n_s}–{n_e}" if n_s else "",
         })
     return rows

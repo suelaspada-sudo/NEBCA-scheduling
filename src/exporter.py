@@ -27,9 +27,6 @@ WIX_FIELDNAMES = [
 ]
 
 SERVICE_DISPLAY = {
-    "chair_massage": "Chair Massage",
-    "hand_massage": "Hand Massage",
-    "nail_stamping": "Nail Stamping",
     "hair": "Hair Styling",
     "makeup": "Makeup",
     "portrait": "Portrait Session",

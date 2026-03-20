@@ -15,8 +15,7 @@
           <th>Model</th><th>Group</th><th>Rehearsal</th>
           <th>Hair Stylist</th><th>Hair Time</th>
           <th>Makeup Artist</th><th>Makeup Time</th>
-          <th>Chair Massage</th><th>Portrait</th>
-          <th>Hand Massage</th><th>Nails</th>
+          <th>Portrait</th>
         </tr>
       </thead>
       <tbody>
@@ -29,10 +28,7 @@
           <td>{% if row["Hair Time"] %}<span class="badge badge-blue">{{ row["Hair Time"] }}</span>{% else %}<span style="color:#aaa">—</span>{% endif %}</td>
           <td>{{ row["Makeup Artist"] }}</td>
           <td>{% if row["Makeup Time"] %}<span class="badge badge-blue">{{ row["Makeup Time"] }}</span>{% else %}<span style="color:#aaa">—</span>{% endif %}</td>
-          <td>{% if row["Chair Massage"] %}<span class="badge badge-orange">{{ row["Chair Massage"] }}</span>{% else %}<span style="color:#aaa">—</span>{% endif %}</td>
           <td>{% if row.Portrait %}<span class="badge badge-green">{{ row.Portrait }}</span>{% else %}<span style="color:#aaa;font-size:0.7rem">not scheduled</span>{% endif %}</td>
-          <td>{% if row["Hand Massage"] %}<span class="badge badge-orange">{{ row["Hand Massage"] }}</span>{% else %}<span style="color:#aaa">—</span>{% endif %}</td>
-          <td>{% if row.Nails %}<span class="badge badge-blue">{{ row.Nails }}</span>{% else %}<span style="color:#aaa">—</span>{% endif %}</td>
         </tr>
         {% else %}
         <tr><td colspan="11" style="text-align:center;color:#aaa;padding:32px;">No schedule generated yet.</td></tr>
