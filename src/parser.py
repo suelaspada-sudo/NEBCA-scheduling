@@ -119,6 +119,20 @@ def _detect_group_row(name: str) -> str | None:
     return None
 
 
+def _extract_rehearsal_time(row: pd.Series) -> str:
+    """
+    Pull a rehearsal time string from any column in a header row.
+    Looks for patterns like '3:00-4:00', '1:30-2:30 PM', etc.
+    """
+    time_pattern = re.compile(r'\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}(?:\s*[APap][Mm])?')
+    for val in row.values:
+        text = str(val).strip()
+        match = time_pattern.search(text)
+        if match:
+            return match.group()
+    return ""
+
+
 def parse_models_master(path: str | Path) -> list[dict]:
     """
     Returns list of model dicts with pre-assigned glam info (if any).
@@ -126,7 +140,7 @@ def parse_models_master(path: str | Path) -> list[dict]:
     Handles two group formats:
       - A dedicated 'Group' column per row
       - Group header rows interspersed (e.g. a row where Name = 'Group 1')
-        — the current group is tracked and applied to all following model rows.
+        with an optional rehearsal time in another cell on the same row.
 
     Duplicate column names (Email, Phone, Time Slot, Notes appear twice)
     are handled by pandas auto-renaming to .1 suffix.
@@ -136,6 +150,7 @@ def parse_models_master(path: str | Path) -> list[dict]:
 
     models = []
     current_group = ""
+    current_rehearsal = ""
 
     for _, row in df.iterrows():
         name = _safe_str(row.get("Name", ""))
@@ -146,6 +161,7 @@ def parse_models_master(path: str | Path) -> list[dict]:
         group_from_row = _detect_group_row(name)
         if group_from_row:
             current_group = group_from_row
+            current_rehearsal = _extract_rehearsal_time(row)
             continue
 
         # Use explicit Group column if present, otherwise use tracked group
@@ -157,6 +173,7 @@ def parse_models_master(path: str | Path) -> list[dict]:
             "email": _safe_str(row.get("E-mail", "")),
             "phone": _safe_str(row.get("Phone #", "")),
             "group": group,
+            "rehearsal_time": current_rehearsal,
             "order": _safe_str(row.get("Order", row.get("#", ""))),
             # pre-assigned glam (may be blank — app will fill these in)
             "assigned_hair_stylist": _safe_str(row.get("Hair Stylist Name", "")),
@@ -331,7 +348,7 @@ def merge_model_data(models: list[dict], responses: list[dict]) -> list[dict]:
         else:
             model.setdefault("wants_hair", True)
             model.setdefault("wants_makeup", True)
-            model.setdefault("wants_nails", False)
+            model.setdefault("wants_nails", True)
             model.setdefault("hair_ideas", "")
             model.setdefault("makeup_ideas", "")
             model.setdefault("hair_description", "")
