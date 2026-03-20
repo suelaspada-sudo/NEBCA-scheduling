@@ -36,9 +36,6 @@ import copy
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 DURATIONS = {
-    "chair_massage": 10,
-    "hand_massage": 10,
-    "nail_stamping": 10,
     "hair": 45,
     "makeup": 45,
     "portrait": 5,
@@ -46,12 +43,9 @@ DURATIONS = {
 
 # Time-only tuples (hour, minute) — resolved to datetimes in Scheduler.__init__
 _WINDOW_TIMES = {
-    "chair_massage": ((11, 30), (18, 30)),
-    "hand_massage":  ((11, 30), (18, 30)),
-    "nail_stamping": ((11, 30), (18, 30)),
-    "hair":          ((11, 30), (18, 30)),
-    "makeup":        ((11, 30), (18, 30)),
-    "portrait":      ((13, 30), (18, 30)),
+    "hair":     ((11, 30), (18, 30)),
+    "makeup":   ((11, 30), (18, 30)),
+    "portrait": ((13, 30), (18, 30)),
 }
 
 _BLACKOUT_TIMES = {
@@ -123,9 +117,6 @@ class Scheduler:
         self,
         models: list[dict],
         artists: list[dict],
-        num_massage_tables: int = 2,
-        num_hand_massage_tables: int = 2,
-        num_nail_stations: int = 2,
         num_portrait_slots: int = 1,
         event_date: str = "2026-01-01",
         hair_duration_min: int = 60,
@@ -156,15 +147,6 @@ class Scheduler:
         for a in artists:
             self.calendars[f"hair::{a['name']}"] = ProviderCalendar(a["name"], "hair")
             self.calendars[f"makeup::{a['name']}"] = ProviderCalendar(a["name"], "makeup")
-
-        for i in range(num_massage_tables):
-            self.calendars[f"chair_massage::table{i+1}"] = ProviderCalendar(f"Massage Table {i+1}", "chair_massage")
-
-        for i in range(num_hand_massage_tables):
-            self.calendars[f"hand_massage::table{i+1}"] = ProviderCalendar(f"Hand Massage {i+1}", "hand_massage")
-
-        for i in range(num_nail_stations):
-            self.calendars[f"nail_stamping::station{i+1}"] = ProviderCalendar(f"Nail Station {i+1}", "nail_stamping")
 
         for i in range(num_portrait_slots):
             self.calendars[f"portrait::slot{i+1}"] = ProviderCalendar(f"Portrait Slot {i+1}", "portrait")
@@ -242,22 +224,10 @@ class Scheduler:
         appointments = {}
         model_busy: list[tuple[datetime, datetime]] = []
 
-        day_start = WINDOWS["chair_massage"][0]  # 11:30 AM
+        day_start = WINDOWS["hair"][0]  # 11:30 AM
 
-        # ── 1. Chair massage (before hair & makeup) ────────────────────────────
-        massage_end = day_start
-        for mk in sorted(k for k in self.calendars if k.startswith("chair_massage::")):
-            slot = self._find_slot("chair_massage", mk, day_start, group_key, model_busy)
-            if slot:
-                start, end = slot
-                self._book("chair_massage", mk, start, end, name)
-                model_busy.append((start, end))
-                appointments["chair_massage"] = {"provider": self.calendars[mk].name, "start": start, "end": end}
-                massage_end = end
-                break
-
-        # ── 2. Hair ────────────────────────────────────────────────────────────
-        hair_end = massage_end
+        # ── 1. Hair ────────────────────────────────────────────────────────────
+        hair_end = day_start
         if model.get("wants_hair", True):
             assigned_hair = model.get("assigned_hair_stylist", "")
             all_hair = [
@@ -269,12 +239,12 @@ class Scheduler:
             # Find earliest available slot across all artists; prefer assigned if within 30 min of best
             best_slot, best_candidate = None, None
             for candidate in all_hair:
-                slot = self._find_slot("hair", f"hair::{candidate}", massage_end, group_key, model_busy)
+                slot = self._find_slot("hair", f"hair::{candidate}", day_start, group_key, model_busy)
                 if slot and (best_slot is None or slot[0] < best_slot[0]):
                     best_slot, best_candidate = slot, candidate
             # If assigned artist can serve within 30 min of the best slot, prefer them
             if assigned_hair and f"hair::{assigned_hair}" in self.calendars and best_slot:
-                assigned_slot = self._find_slot("hair", f"hair::{assigned_hair}", massage_end, group_key, model_busy)
+                assigned_slot = self._find_slot("hair", f"hair::{assigned_hair}", day_start, group_key, model_busy)
                 if assigned_slot and (assigned_slot[0] - best_slot[0]).total_seconds() <= 1800:
                     best_slot, best_candidate = assigned_slot, assigned_hair
             if best_slot:
@@ -324,27 +294,6 @@ class Scheduler:
                 model_busy.append((start, end))
                 appointments["portrait"] = {"provider": self.calendars[pk].name, "start": start, "end": end}
                 break
-
-        # ── 5. Hand massage (any time, non-overlapping with model's schedule) ──
-        for hk in sorted(k for k in self.calendars if k.startswith("hand_massage::")):
-            slot = self._find_slot("hand_massage", hk, day_start, group_key, model_busy)
-            if slot:
-                start, end = slot
-                self._book("hand_massage", hk, start, end, name)
-                model_busy.append((start, end))
-                appointments["hand_massage"] = {"provider": self.calendars[hk].name, "start": start, "end": end}
-                break
-
-        # ── 6. Nail stamping (only if requested) ──────────────────────────────
-        if model.get("wants_nails", False):
-            for nk in sorted(k for k in self.calendars if k.startswith("nail_stamping::")):
-                slot = self._find_slot("nail_stamping", nk, day_start, group_key, model_busy)
-                if slot:
-                    start, end = slot
-                    self._book("nail_stamping", nk, start, end, name)
-                    model_busy.append((start, end))
-                    appointments["nail_stamping"] = {"provider": self.calendars[nk].name, "start": start, "end": end}
-                    break
 
         return {
             "model": name,

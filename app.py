@@ -88,12 +88,9 @@ def configure():
     if request.method == "POST":
         config = {
             "event_date": request.form.get("event_date", "2026-01-01"),
-            "num_massage_tables": int(request.form.get("num_massage_tables", 2)),
-            "num_hand_massage_tables": int(request.form.get("num_hand_massage_tables", 2)),
-            "num_nail_stations": int(request.form.get("num_nail_stations", 2)),
             "num_portrait_slots": int(request.form.get("num_portrait_slots", 1)),
-            "hair_duration": int(request.form.get("hair_duration", 60)),
-            "makeup_duration": int(request.form.get("makeup_duration", 60)),
+            "hair_duration": int(request.form.get("hair_duration", 45)),
+            "makeup_duration": int(request.form.get("makeup_duration", 45)),
         }
         # Save config to file so it persists
         with open("data/config.json", "w") as f:
@@ -113,9 +110,6 @@ def _load_config() -> dict:
             return json.load(f)
     return {
         "event_date": "2026-04-25",
-        "num_massage_tables": 2,
-        "num_hand_massage_tables": 2,
-        "num_nail_stations": 2,
         "num_portrait_slots": 1,
         "hair_duration": 45,
         "makeup_duration": 45,
@@ -174,9 +168,6 @@ def run_schedule():
     scheduler = Scheduler(
         models=STATE["models"],
         artists=STATE["artists"],
-        num_massage_tables=config["num_massage_tables"],
-        num_hand_massage_tables=config["num_hand_massage_tables"],
-        num_nail_stations=config["num_nail_stations"],
         num_portrait_slots=config["num_portrait_slots"],
         event_date=config["event_date"],
         hair_duration_min=config["hair_duration"],
