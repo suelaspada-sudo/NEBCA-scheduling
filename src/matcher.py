@@ -98,6 +98,7 @@ def match_models_to_artists(
     models: list[dict],
     artists: list[dict],
     role: str,  # "hair" or "makeup"
+    other_assignments: dict[str, str] | None = None,  # already-assigned other role, to avoid same artist for both
 ) -> dict[str, str]:
     """
     Greedy best-match assignment.
@@ -106,6 +107,7 @@ def match_models_to_artists(
       - artist.role (must be role or "both")
       - artist.max_models capacity
       - pre-assigned artists (already in model dict)
+      - other_assignments: won't assign the same artist to both hair AND makeup for the same model
     """
     eligible = [a for a in artists if a["role"] in (role, "both")]
 
@@ -137,38 +139,46 @@ def match_models_to_artists(
 
     # Sort models by how constrained they are (fewest compatible artists first)
     def constraint_score(model):
+        already_assigned = (other_assignments or {}).get(model["name"], "")
         compat = sum(
             1 for a in eligible
-            if capacity.get(a["name"], 0) > 0 and score_match(model, a) > 0
+            if capacity.get(a["name"], 0) > 0
+            and score_match(model, a) > 0
+            and a["name"] != already_assigned
         )
         return compat
 
     unassigned.sort(key=constraint_score)
 
     for model in unassigned:
-        # Find best available artist
+        # Artist already assigned to this model for the other role — don't reuse them
+        already_assigned_other = (other_assignments or {}).get(model["name"], "")
+
         best_artist = None
         best_score = -1.0
 
         for artist in eligible:
             if capacity.get(artist["name"], 0) <= 0:
                 continue
+            # Skip if this artist is already doing the other service for this model
+            if artist["name"] == already_assigned_other:
+                continue
             s = score_match(model, artist)
             if s > best_score:
                 best_score = s
                 best_artist = artist
 
+        if not best_artist:
+            # Fallback: allow any available artist (including other-role artist if truly no choice)
+            candidates = [a for a in eligible if capacity.get(a["name"], 0) > 0]
+            if candidates:
+                best_artist = max(candidates, key=lambda a: capacity.get(a["name"], 0))
+
         if best_artist:
             assignment[model["name"]] = best_artist["name"]
             capacity[best_artist["name"]] -= 1
         else:
-            # All at capacity — force assign to least-loaded
-            if eligible:
-                fallback = max(eligible, key=lambda a: capacity.get(a["name"], 0))
-                assignment[model["name"]] = fallback["name"]
-                capacity[fallback["name"]] -= 1
-            else:
-                assignment[model["name"]] = "UNASSIGNED"
+            assignment[model["name"]] = "UNASSIGNED"
 
     return assignment
 
@@ -179,7 +189,7 @@ def run_matching(models: list[dict], artists: list[dict]) -> list[dict]:
     Returns updated models list.
     """
     hair_assignments = match_models_to_artists(models, artists, "hair")
-    makeup_assignments = match_models_to_artists(models, artists, "makeup")
+    makeup_assignments = match_models_to_artists(models, artists, "makeup", other_assignments=hair_assignments)
 
     for model in models:
         name = model["name"]
