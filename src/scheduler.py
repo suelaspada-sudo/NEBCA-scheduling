@@ -45,7 +45,7 @@ DURATIONS = {
 _WINDOW_TIMES = {
     "hair":     ((11, 30), (18, 30)),
     "makeup":   ((11, 30), (18, 30)),
-    "portrait": ((13, 30), (18, 30)),
+    "portrait": ((13, 30), (19, 0)),
 }
 
 _BLACKOUT_TIMES = {
