@@ -51,7 +51,7 @@ _WINDOW_TIMES = {
     "nail_stamping": ((12, 0), (19, 0)),
     "hair":          ((12, 0), (19, 0)),
     "makeup":        ((12, 0), (19, 0)),
-    "portrait":      ((13, 30), (18, 30)),
+    "portrait":      ((13, 30), (19, 0)),
 }
 
 _BLACKOUT_TIMES = {
