@@ -30,6 +30,7 @@ STATE = {
     "artists": [],
     "schedule": [],
     "schedule_rows": [],
+    "provider_schedules": [],
     "match_report": [],
 }
 
@@ -176,6 +177,7 @@ def run_schedule():
 
     STATE["schedule"] = scheduler.run()
     STATE["schedule_rows"] = schedule_to_rows(STATE["schedule"])
+    STATE["provider_schedules"] = scheduler.get_provider_schedules()
     flash(f"Scheduled {len(STATE['schedule'])} models.", "success")
     return redirect(url_for("view_schedule"))
 
@@ -232,6 +234,14 @@ def export_master():
 @app.route("/artists")
 def artists():
     return render_template("artists.html", artists=STATE["artists"])
+
+
+@app.route("/schedule/providers")
+def provider_schedules():
+    if not STATE["provider_schedules"]:
+        flash("Generate a schedule first.", "error")
+        return redirect(url_for("index"))
+    return render_template("provider_schedule.html", providers=STATE["provider_schedules"])
 
 
 # ─── Run ──────────────────────────────────────────────────────────────────────

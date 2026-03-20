@@ -152,6 +152,13 @@ class Scheduler:
         for i in range(num_portrait_slots):
             self.calendars[f"portrait::slot{i+1}"] = ProviderCalendar(f"Portrait Slot {i+1}", "portrait")
 
+        # Pre-book a 30-minute break for every provider at 2:30–3:00 PM
+        # (sits naturally between the group2 blackout 1:30–2:30 and group1 blackout 3:00–4:00)
+        break_start = _make_dt(event_date, 14, 30)
+        break_end   = _make_dt(event_date, 15, 0)
+        for cal in self.calendars.values():
+            cal.book(break_start, break_end, "__break__")
+
         self.schedule: list[dict] = []
 
     def _find_slot(
@@ -306,15 +313,42 @@ class Scheduler:
         }
 
     def run(self) -> list[dict]:
-        """Schedule all models. Group 2 / Hope Ambassadors first (tighter window)."""
+        """Schedule all models except board members. Group 2 / Hope Ambassadors first."""
         def priority(model):
             gk = _group_key(model)
             return 0 if gk in ("group2", "hope_ambassador") else 1
 
         for model in sorted(self.models, key=priority):
+            if _group_key(model) == "board_member":
+                continue
             self.schedule.append(self._schedule_model(model))
 
         return self.schedule
+
+    def get_provider_schedules(self) -> list[dict]:
+        """Return per-provider sorted appointment list for the artist schedule view."""
+        by_name: dict[str, dict] = {}
+        for key, cal in self.calendars.items():
+            name = cal.name
+            if name not in by_name:
+                by_name[name] = {"name": name, "service": cal.service, "slots": []}
+            seen_break = any(s["is_break"] for s in by_name[name]["slots"])
+            for start, end, model in cal.slots:
+                is_break = model == "__break__"
+                if is_break and seen_break:
+                    continue  # deduplicate break for "both" artists
+                if is_break:
+                    seen_break = True
+                by_name[name]["slots"].append({
+                    "start": start,
+                    "end": end,
+                    "model": model,
+                    "service": cal.service,
+                    "is_break": is_break,
+                })
+        for data in by_name.values():
+            data["slots"].sort(key=lambda x: x["start"])
+        return sorted(by_name.values(), key=lambda x: x["name"])
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

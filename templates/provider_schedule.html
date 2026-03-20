@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+  <h2>Artist &amp; Photographer Schedules</h2>
+  <a href="/schedule/view" class="btn btn-secondary">← Master Schedule</a>
+</div>
+
+{% set hair_providers   = providers | selectattr("service", "equalto", "hair")     | list %}
+{% set makeup_providers = providers | selectattr("service", "equalto", "makeup")   | list %}
+{% set portrait_providers = providers | selectattr("service", "equalto", "portrait") | list %}
+
+{% for section_title, section_providers in [
+    ("Hair Stylists", hair_providers),
+    ("Makeup Artists", makeup_providers),
+    ("Portrait Photographers", portrait_providers)
+] %}
+{% if section_providers %}
+<h3 style="margin:32px 0 12px;color:#444;border-bottom:2px solid #e0e0e0;padding-bottom:6px;">{{ section_title }}</h3>
+<div style="display:flex;flex-wrap:wrap;gap:20px;">
+{% for p in section_providers %}
+  <div class="card" style="min-width:280px;flex:1;max-width:400px;">
+    <h4 style="margin:0 0 12px;font-size:1rem;">{{ p.name }}</h4>
+    {% if p.slots %}
+    <table style="width:100%;font-size:0.8rem;">
+      <thead>
+        <tr style="color:#888;text-align:left;">
+          <th style="padding:4px 8px 4px 0;">Time</th>
+          <th style="padding:4px 0;">Client</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for slot in p.slots %}
+        {% if slot.is_break %}
+        <tr style="background:#fff8e1;">
+          <td style="padding:5px 8px 5px 0;white-space:nowrap;color:#f57f17;font-weight:600;">
+            {{ slot.start.strftime("%-I:%M %p") }}–{{ slot.end.strftime("%-I:%M %p") }}
+          </td>
+          <td style="padding:5px 0;color:#f57f17;font-weight:600;">⏸ Break</td>
+        </tr>
+        {% else %}
+        <tr style="border-top:1px solid #f0f0f0;">
+          <td style="padding:5px 8px 5px 0;white-space:nowrap;color:#555;">
+            {{ slot.start.strftime("%-I:%M %p") }}–{{ slot.end.strftime("%-I:%M %p") }}
+          </td>
+          <td style="padding:5px 0;">{{ slot.model }}</td>
+        </tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="color:#aaa;font-size:0.85rem;">No appointments scheduled.</p>
+    {% endif %}
+  </div>
+{% endfor %}
+</div>
+{% endif %}
+{% endfor %}
+{% endblock %}
