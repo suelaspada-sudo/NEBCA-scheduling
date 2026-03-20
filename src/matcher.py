@@ -188,6 +188,14 @@ def run_matching(models: list[dict], artists: list[dict]) -> list[dict]:
     Run hair + makeup matching and attach results to models.
     Returns updated models list.
     """
+    # If a model has the same artist pre-assigned for both hair and makeup,
+    # clear the makeup pre-assignment so it gets re-matched to a different artist.
+    for model in models:
+        hair = model.get("assigned_hair_stylist", "").strip()
+        makeup = model.get("assigned_makeup_artist", "").strip()
+        if hair and makeup and hair.lower() == makeup.lower():
+            model["assigned_makeup_artist"] = ""
+
     hair_assignments = match_models_to_artists(models, artists, "hair")
     makeup_assignments = match_models_to_artists(models, artists, "makeup", other_assignments=hair_assignments)
 

@@ -117,6 +117,9 @@ _NAME_SUFFIXES = {
     "hope ambassadors": "hope_ambassador",
 }
 
+# Words appended to names that carry no group meaning — just strip them
+_NAME_NOISE_WORDS = ["veteran", "new"]
+
 
 def _detect_group_row(name: str) -> str | None:
     """
@@ -141,14 +144,20 @@ def _detect_group_row(name: str) -> str | None:
 
 def _strip_name_suffix(name: str) -> tuple[str, str | None]:
     """
-    If a name has a group suffix like 'board member' appended, strip it and return
-    (clean_name, group_key). Otherwise return (name, None).
+    Strip group suffixes and noise words from a person's name.
+    Returns (clean_name, group_key_or_None).
     """
     name_lower = name.lower().strip()
+    # Check group-bearing suffixes first (e.g. "board member")
     for suffix, group_key in _NAME_SUFFIXES.items():
         if name_lower.endswith(suffix):
             clean = name[:-(len(suffix))].strip().rstrip(",").strip()
             return clean, group_key
+    # Strip plain noise words like "veteran" or "new"
+    for noise in _NAME_NOISE_WORDS:
+        if name_lower.endswith(" " + noise):
+            clean = name[:-(len(noise) + 1)].strip()
+            return clean, None
     return name, None
 
 
