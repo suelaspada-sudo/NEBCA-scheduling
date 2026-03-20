@@ -250,29 +250,52 @@ class Scheduler:
         hair_end = massage_end
         if model.get("wants_hair", True):
             hair_artist = model.get("assigned_hair_stylist", "")
-            hair_key = f"hair::{hair_artist}"
-            if hair_key in self.calendars:
-                slot = self._find_slot("hair", hair_key, massage_end, group_key, model_busy)
+            # Try assigned artist first, then fall back to any available hair artist
+            hair_candidates = []
+            if hair_artist and f"hair::{hair_artist}" in self.calendars:
+                hair_candidates.append(hair_artist)
+            for key in sorted(self.calendars):
+                if key.startswith("hair::") and key != f"hair::{hair_artist}":
+                    a_name = key[len("hair::"):]
+                    artist_info = self.artists.get(a_name)
+                    if artist_info and artist_info.get("role") in ("hair", "both"):
+                        hair_candidates.append(a_name)
+            for candidate in hair_candidates:
+                slot = self._find_slot("hair", f"hair::{candidate}", massage_end, group_key, model_busy)
                 if slot:
                     start, end = slot
-                    self._book("hair", hair_key, start, end, name)
+                    self._book("hair", f"hair::{candidate}", start, end, name)
                     model_busy.append((start, end))
-                    appointments["hair"] = {"provider": hair_artist, "start": start, "end": end}
+                    appointments["hair"] = {"provider": candidate, "start": start, "end": end}
                     hair_end = end
+                    break
 
         # ── 3. Makeup (after hair) ─────────────────────────────────────────────
         makeup_end = hair_end
         if model.get("wants_makeup", True):
             makeup_artist = model.get("assigned_makeup_artist", "")
-            makeup_key = f"makeup::{makeup_artist}"
-            if makeup_key in self.calendars:
-                slot = self._find_slot("makeup", makeup_key, hair_end, group_key, model_busy)
+            booked_hair_artist = appointments.get("hair", {}).get("provider", "")
+            # Try assigned artist first, then fall back to any available makeup artist
+            makeup_candidates = []
+            if makeup_artist and f"makeup::{makeup_artist}" in self.calendars:
+                makeup_candidates.append(makeup_artist)
+            for key in sorted(self.calendars):
+                if key.startswith("makeup::") and key != f"makeup::{makeup_artist}":
+                    a_name = key[len("makeup::"):]
+                    if a_name == booked_hair_artist:
+                        continue  # don't use same artist for both
+                    artist_info = self.artists.get(a_name)
+                    if artist_info and artist_info.get("role") in ("makeup", "both"):
+                        makeup_candidates.append(a_name)
+            for candidate in makeup_candidates:
+                slot = self._find_slot("makeup", f"makeup::{candidate}", hair_end, group_key, model_busy)
                 if slot:
                     start, end = slot
-                    self._book("makeup", makeup_key, start, end, name)
+                    self._book("makeup", f"makeup::{candidate}", start, end, name)
                     model_busy.append((start, end))
-                    appointments["makeup"] = {"provider": makeup_artist, "start": start, "end": end}
+                    appointments["makeup"] = {"provider": candidate, "start": start, "end": end}
                     makeup_end = end
+                    break
 
         # ── 4. Portrait (after hair + makeup, within portrait window) ──────────
         glam_done = max(hair_end, makeup_end)
