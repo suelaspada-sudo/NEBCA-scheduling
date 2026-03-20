@@ -46,12 +46,12 @@ DURATIONS = {
 
 # Time-only tuples (hour, minute) — resolved to datetimes in Scheduler.__init__
 _WINDOW_TIMES = {
-    "chair_massage": ((12, 0), (19, 0)),
-    "hand_massage":  ((12, 0), (19, 0)),
-    "nail_stamping": ((12, 0), (19, 0)),
-    "hair":          ((12, 0), (19, 0)),
-    "makeup":        ((12, 0), (19, 0)),
-    "portrait":      ((13, 30), (19, 0)),
+    "chair_massage": ((11, 30), (18, 30)),
+    "hand_massage":  ((11, 30), (18, 30)),
+    "nail_stamping": ((11, 30), (18, 30)),
+    "hair":          ((11, 30), (18, 30)),
+    "makeup":        ((11, 30), (18, 30)),
+    "portrait":      ((13, 30), (18, 30)),
 }
 
 _BLACKOUT_TIMES = {
@@ -189,6 +189,15 @@ class Scheduler:
         if not cal:
             return None
 
+        # For "both" artists, combine hair+makeup slots to prevent double-booking
+        sibling_service = "makeup" if service == "hair" else "hair"
+        sibling_key = f"{sibling_service}::{cal.name}"
+        sibling_cal = (
+            self.calendars.get(sibling_key)
+            if self.artists.get(cal.name, {}).get("role") == "both"
+            else None
+        )
+
         start = max(earliest, win_start)
 
         while start + dur <= win_end:
@@ -199,9 +208,10 @@ class Scheduler:
                 start = REHEARSAL_BLACKOUTS[group_key][1]
                 continue
 
-            # Check provider availability
+            # Check provider availability (include sibling calendar for "both" artists)
+            all_provider_slots = cal.slots + (sibling_cal.slots if sibling_cal else [])
             provider_conflict = None
-            for s, e, _ in sorted(cal.slots, key=lambda x: x[0]):
+            for s, e, _ in sorted(all_provider_slots, key=lambda x: x[0]):
                 if _overlaps(start, end, s, e):
                     provider_conflict = e
                     break
@@ -232,7 +242,7 @@ class Scheduler:
         appointments = {}
         model_busy: list[tuple[datetime, datetime]] = []
 
-        day_start = WINDOWS["chair_massage"][0]  # 12:00 PM
+        day_start = WINDOWS["chair_massage"][0]  # 11:30 AM
 
         # ── 1. Chair massage (before hair & makeup) ────────────────────────────
         massage_end = day_start
