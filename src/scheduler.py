@@ -39,8 +39,8 @@ DURATIONS = {
     "chair_massage": 10,
     "hand_massage": 10,
     "nail_stamping": 10,
-    "hair": 60,
-    "makeup": 60,
+    "hair": 45,
+    "makeup": 45,
     "portrait": 5,
 }
 

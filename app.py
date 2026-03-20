@@ -117,8 +117,8 @@ def _load_config() -> dict:
         "num_hand_massage_tables": 2,
         "num_nail_stations": 2,
         "num_portrait_slots": 1,
-        "hair_duration": 60,
-        "makeup_duration": 60,
+        "hair_duration": 45,
+        "makeup_duration": 45,
     }
 
 
