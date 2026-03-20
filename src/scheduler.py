@@ -271,8 +271,8 @@ class Scheduler:
                     hair_end = end
                     break
 
-        # ── 3. Makeup (parallel with hair — both can happen simultaneously) ──────
-        makeup_end = massage_end
+        # ── 3. Makeup (after hair) ─────────────────────────────────────────────
+        makeup_end = hair_end
         if model.get("wants_makeup", True):
             assigned_mu = model.get("assigned_makeup_artist", "")
             booked_hair = appointments.get("hair", {}).get("provider", "")
@@ -287,7 +287,7 @@ class Scheduler:
             makeup_candidates = (([assigned_mu] if assigned_mu and f"makeup::{assigned_mu}" in self.calendars else [])
                                  + fallbacks)
             for candidate in makeup_candidates:
-                slot = self._find_slot("makeup", f"makeup::{candidate}", massage_end, group_key, model_busy)
+                slot = self._find_slot("makeup", f"makeup::{candidate}", hair_end, group_key, model_busy)
                 if slot:
                     start, end = slot
                     self._book("makeup", f"makeup::{candidate}", start, end, name)
