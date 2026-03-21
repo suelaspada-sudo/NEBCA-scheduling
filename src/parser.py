@@ -296,6 +296,14 @@ def parse_glam_info(path: str | Path) -> list[dict]:
     df = pd.read_csv(path, dtype=str)
     df.columns = [c.strip() for c in df.columns]
 
+    print(f"[GLAM DEBUG] columns: {list(df.columns)}")
+    print(f"[GLAM DEBUG] first 5 rows non-empty cell counts:")
+    for i, (_, row) in enumerate(df.iterrows()):
+        if i >= 5:
+            break
+        non_empty = [str(v).strip() for v in row.values if not pd.isna(v) and str(v).strip()]
+        print(f"  row {i}: {non_empty}")
+
     artists = []
     current_section_role: str | None = None  # set when a section header row is found
 
@@ -304,7 +312,7 @@ def parse_glam_info(path: str | Path) -> list[dict]:
         # col A ("Unnamed: 0") rather than "First Name", so first/last would be empty.
         section = _detect_glam_section_row(row)
         if section:
-            print(f"[DEBUG] Detected section header: {section!r} from row values: {[str(v).strip() for v in row.values if not __import__('pandas').isna(v) and str(v).strip()]}")
+            print(f"[GLAM DEBUG] Section header detected: {section!r}")
             current_section_role = section
             continue
 
