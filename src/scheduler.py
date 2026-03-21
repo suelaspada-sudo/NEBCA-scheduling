@@ -186,12 +186,22 @@ class Scheduler:
         self.schedule: list[dict] = []
 
     def _booking_count(self, artist_name: str) -> int:
-        """Total non-break appointments booked for an artist across all their calendars."""
-        total = 0
-        for key, cal in self.calendars.items():
+        """
+        Number of unique models served by this artist across all their calendars.
+
+        Counting unique models (not raw appointments) is correct because a "both"
+        artist who does hair AND makeup for the same model should count as 1 model
+        served, not 2.  The old per-appointment count made "both" artists appear
+        full at half their real capacity and knocked them out of the candidate list
+        too early, leaving models like Kristin Perry without any hair appointment.
+        """
+        served: set[str] = set()
+        for cal in self.calendars.values():
             if cal.name == artist_name:
-                total += sum(1 for _, _, m in cal.slots if m != "__break__")
-        return total
+                for _, _, m in cal.slots:
+                    if m != "__break__":
+                        served.add(m)
+        return len(served)
 
     def _find_slot(
         self,
