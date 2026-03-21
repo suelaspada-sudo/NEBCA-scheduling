@@ -244,17 +244,17 @@ class Scheduler:
                 for a_name in [key[len("hair::"):]]
                 if self.artists.get(a_name, {}).get("role") in ("hair", "both")
             ]
-            # Find earliest available slot across all artists; prefer assigned if within 30 min of best
             best_slot, best_candidate = None, None
-            for candidate in all_hair:
-                slot = self._find_slot("hair", f"hair::{candidate}", day_start, group_key, model_busy)
-                if slot and (best_slot is None or slot[0] < best_slot[0]):
-                    best_slot, best_candidate = slot, candidate
-            # If assigned artist can serve within 30 min of the best slot, prefer them
-            if assigned_hair and f"hair::{assigned_hair}" in self.calendars and best_slot:
-                assigned_slot = self._find_slot("hair", f"hair::{assigned_hair}", day_start, group_key, model_busy)
-                if assigned_slot and (assigned_slot[0] - best_slot[0]).total_seconds() <= 1800:
-                    best_slot, best_candidate = assigned_slot, assigned_hair
+            # If a specific artist was requested, use them exclusively (hard assignment)
+            if assigned_hair and f"hair::{assigned_hair}" in self.calendars:
+                best_slot = self._find_slot("hair", f"hair::{assigned_hair}", day_start, group_key, model_busy)
+                best_candidate = assigned_hair if best_slot else None
+            # Otherwise find earliest available slot across all artists
+            if not best_slot:
+                for candidate in all_hair:
+                    slot = self._find_slot("hair", f"hair::{candidate}", day_start, group_key, model_busy)
+                    if slot and (best_slot is None or slot[0] < best_slot[0]):
+                        best_slot, best_candidate = slot, candidate
             if best_slot:
                 start, end = best_slot
                 self._book("hair", f"hair::{best_candidate}", start, end, name)
@@ -274,16 +274,17 @@ class Scheduler:
                 if a_name != booked_hair
                 and self.artists.get(a_name, {}).get("role") in ("makeup", "both")
             ]
-            # Find earliest available slot across all artists; prefer assigned if within 30 min of best
             best_slot, best_candidate = None, None
-            for candidate in all_makeup:
-                slot = self._find_slot("makeup", f"makeup::{candidate}", day_start, group_key, model_busy)
-                if slot and (best_slot is None or slot[0] < best_slot[0]):
-                    best_slot, best_candidate = slot, candidate
-            if assigned_mu and f"makeup::{assigned_mu}" in self.calendars and best_slot:
-                assigned_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", day_start, group_key, model_busy)
-                if assigned_slot and (assigned_slot[0] - best_slot[0]).total_seconds() <= 1800:
-                    best_slot, best_candidate = assigned_slot, assigned_mu
+            # If a specific artist was requested, use them exclusively (hard assignment)
+            if assigned_mu and f"makeup::{assigned_mu}" in self.calendars:
+                best_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", day_start, group_key, model_busy)
+                best_candidate = assigned_mu if best_slot else None
+            # Otherwise find earliest available slot across all artists
+            if not best_slot:
+                for candidate in all_makeup:
+                    slot = self._find_slot("makeup", f"makeup::{candidate}", day_start, group_key, model_busy)
+                    if slot and (best_slot is None or slot[0] < best_slot[0]):
+                        best_slot, best_candidate = slot, candidate
             if best_slot:
                 start, end = best_slot
                 self._book("makeup", f"makeup::{best_candidate}", start, end, name)
