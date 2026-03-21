@@ -169,10 +169,14 @@ def match_models_to_artists(
                 best_artist = artist
 
         if not best_artist:
-            # Fallback: allow any available artist (including other-role artist if truly no choice)
+            # Fallback 1: any artist still within capacity
             candidates = [a for a in eligible if capacity.get(a["name"], 0) > 0]
+            if not candidates:
+                # Fallback 2: all artists are at stated capacity — assign best-scoring anyway
+                # rather than leaving the model UNASSIGNED
+                candidates = eligible
             if candidates:
-                best_artist = max(candidates, key=lambda a: capacity.get(a["name"], 0))
+                best_artist = max(candidates, key=lambda a: (capacity.get(a["name"], 0), score_match(model, a)))
 
         if best_artist:
             assignment[model["name"]] = best_artist["name"]

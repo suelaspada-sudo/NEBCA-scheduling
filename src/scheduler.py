@@ -288,6 +288,20 @@ class Scheduler:
                         best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
                         if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
                             best_slot, best_candidate = slot, candidate
+            # Last resort: all artists regardless of capacity (avoids blank "—" times)
+            if not best_slot:
+                all_hair_any = [
+                    key[len("hair::"):] for key in self.calendars
+                    if key.startswith("hair::")
+                    and self.artists.get(key[len("hair::"):], {}).get("role") in ("hair", "both")
+                ]
+                for candidate in all_hair_any:
+                    slot = self._find_slot("hair", f"hair::{candidate}", day_start, group_key, model_busy)
+                    if slot:
+                        cand_load = self._booking_count(candidate)
+                        best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
+                        if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
+                            best_slot, best_candidate = slot, candidate
             if best_slot:
                 start, end = best_slot
                 self._book("hair", f"hair::{best_candidate}", start, end, name)
@@ -324,6 +338,21 @@ class Scheduler:
                         best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
                         if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
                             best_slot, best_candidate = slot, candidate
+            # Last resort: all artists regardless of capacity (avoids blank "—" times)
+            if not best_slot:
+                all_makeup_any = [
+                    key[len("makeup::"):] for key in self.calendars
+                    if key.startswith("makeup::")
+                    and (key[len("makeup::"):] != booked_hair or same_person_requested)
+                    and self.artists.get(key[len("makeup::"):], {}).get("role") in ("makeup", "both")
+                ]
+                for candidate in all_makeup_any:
+                    slot = self._find_slot("makeup", f"makeup::{candidate}", day_start, group_key, model_busy)
+                    if slot:
+                        cand_load = self._booking_count(candidate)
+                        best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
+                        if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
+                            best_slot, best_candidate = slot, candidate
             if best_slot:
                 start, end = best_slot
                 self._book("makeup", f"makeup::{best_candidate}", start, end, name)
@@ -353,14 +382,16 @@ class Scheduler:
         }
 
     def run(self) -> list[dict]:
-        """Schedule all models except board members. Group 2 / Hope Ambassadors first."""
+        """Schedule all models. Group 2 / Hope Ambassadors first, board members last."""
         def priority(model):
             gk = _group_key(model)
-            return 0 if gk in ("group2", "hope_ambassador") else 1
+            if gk in ("group2", "hope_ambassador"):
+                return 0
+            if gk == "board_member":
+                return 2  # schedule last — no rehearsal blackout gives max flexibility
+            return 1  # group1
 
         for model in sorted(self.models, key=priority):
-            if _group_key(model) == "board_member":
-                continue
             self.schedule.append(self._schedule_model(model))
 
         return self.schedule
