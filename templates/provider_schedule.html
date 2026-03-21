@@ -7,11 +7,13 @@
 
 {% set hair_providers   = providers | selectattr("service", "equalto", "hair")     | list %}
 {% set makeup_providers = providers | selectattr("service", "equalto", "makeup")   | list %}
+{% set both_providers   = providers | selectattr("service", "equalto", "both")     | list %}
 {% set portrait_providers = providers | selectattr("service", "equalto", "portrait") | list %}
 
 {% for section_title, section_providers in [
     ("Hair Stylists", hair_providers),
     ("Makeup Artists", makeup_providers),
+    ("Hair & Makeup Artists", both_providers),
     ("Portrait Photographers", portrait_providers)
 ] %}
 {% if section_providers %}

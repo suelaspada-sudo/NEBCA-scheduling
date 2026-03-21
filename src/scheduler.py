@@ -332,7 +332,11 @@ class Scheduler:
         for key, cal in self.calendars.items():
             name = cal.name
             if name not in by_name:
-                by_name[name] = {"name": name, "service": cal.service, "slots": []}
+                # Use the artist's actual role as the service so makeup-only artists
+                # aren't mislabeled as "hair" just because hair:: keys are inserted first.
+                artist_role = self.artists.get(name, {}).get("role")
+                service = artist_role if artist_role else cal.service
+                by_name[name] = {"name": name, "service": service, "slots": []}
             seen_break = any(s["is_break"] for s in by_name[name]["slots"])
             for start, end, model in cal.slots:
                 is_break = model == "__break__"

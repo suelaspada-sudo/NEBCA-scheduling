@@ -300,15 +300,16 @@ def parse_glam_info(path: str | Path) -> list[dict]:
     current_section_role: str | None = None  # set when a section header row is found
 
     for _, row in df.iterrows():
-        first = _safe_str(row.get("First Name", ""))
-        last = _safe_str(row.get("Last Name", ""))
-        if not first and not last:
-            continue
-
-        # Check if this row is a section header (e.g. "Makeup", "Hair", "Hair & Makeup")
+        # Check section header BEFORE filtering by name — the label may live in
+        # col A ("Unnamed: 0") rather than "First Name", so first/last would be empty.
         section = _detect_glam_section_row(row)
         if section:
             current_section_role = section
+            continue
+
+        first = _safe_str(row.get("First Name", ""))
+        last = _safe_str(row.get("Last Name", ""))
+        if not first and not last:
             continue
 
         pref_count = _safe_str(row.get("# models preference", ""))
