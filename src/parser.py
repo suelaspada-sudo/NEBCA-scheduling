@@ -106,8 +106,12 @@ GROUP_ROW_PATTERNS = [
     ("board_member",     ["board member", "board members", "bad", "bad members"]),
 ]
 
-# Keywords that indicate a row is a section/group header rather than a person
-_HEADER_KEYWORDS = ["rehearsal", "runway", "group", "ambassador", "board member", "bad"]
+# Keywords that indicate a row is a section/group header rather than a person.
+# IMPORTANT: Do NOT add words that also appear as name suffixes (e.g. "board member",
+# "bad", "ambassador") — those are already handled by GROUP_ROW_PATTERNS exact/prefix
+# checks above, and including them here would cause model rows like "Jane Doe board member"
+# to be falsely detected as section headers and skipped.
+_HEADER_KEYWORDS = ["rehearsal", "runway", "group"]
 
 # Suffixes that may be appended to a real person's name indicating their group
 _NAME_SUFFIXES = {

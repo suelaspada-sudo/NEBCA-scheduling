@@ -152,14 +152,17 @@ class Scheduler:
         for i in range(num_portrait_slots):
             self.calendars[f"portrait::slot{i+1}"] = ProviderCalendar(f"Portrait Slot {i+1}", "portrait")
 
-        # Pre-book staggered 30-minute breaks (14:15, 14:30, or 14:45 start) for artists.
-        # Staggering prevents every artist from being on break at the same time while still
-        # fitting between the group2 blackout (1:30–2:30) and group1 blackout (3:00–4:00).
+        # Pre-book staggered 30-minute breaks for artists.
+        # 5 distinct offsets ensure up to 5 artists each get a unique break time;
+        # beyond that they cycle. All break windows sit between the two group
+        # blackouts (group2: 1:30–2:30 PM, group1: 3:00–4:00 PM).
         # Portrait slots always break at 14:30 (fixed).
         _break_offsets = [
+            timedelta(minutes=-30),  # 14:00 – 14:30
             timedelta(minutes=-15),  # 14:15 – 14:45
             timedelta(minutes=0),    # 14:30 – 15:00
             timedelta(minutes=15),   # 14:45 – 15:15
+            timedelta(minutes=30),   # 15:00 – 15:30
         ]
         _base_break = _make_dt(event_date, 14, 30)
         _break_dur  = timedelta(minutes=30)
@@ -255,13 +258,26 @@ class Scheduler:
     def _book(self, service: str, provider_key: str, start: datetime, end: datetime, model_name: str):
         self.calendars[provider_key].book(start, end, model_name)
 
-    def _schedule_model(self, model: dict) -> dict:
+    def _schedule_model(self, model: dict, stagger_idx: int = 0) -> dict:
         name = model["name"]
         group_key = _group_key(model)
         appointments = {}
         model_busy: list[tuple[datetime, datetime]] = []
 
         day_start = WINDOWS["hair"][0]  # 11:30 AM
+
+        # Stagger: alternate odd-indexed models to prefer afternoon slots so that
+        # models are spread across morning AND afternoon rather than everyone piling
+        # into the first available slot at 11:30 AM.
+        # Odd models start their search from after the rehearsal blackout ends
+        # (2:30 PM for group2/hope_ambassador, 4:00 PM for group1).
+        # If no afternoon slot is found we always fall back to the morning search.
+        blackout_end = (
+            REHEARSAL_BLACKOUTS[group_key][1]
+            if group_key and REHEARSAL_BLACKOUTS.get(group_key)
+            else day_start
+        )
+        prefer_afternoon = (stagger_idx % 2 == 1) and (blackout_end > day_start)
 
         # ── 1. Hair (anytime, independent of makeup) ───────────────────────────
         hair_end = day_start
@@ -275,19 +291,28 @@ class Scheduler:
                 and self._booking_count(a_name) < self.artists.get(a_name, {}).get("max_models", 6)
             ]
             best_slot, best_candidate = None, None
+            # Determine search start: afternoon-preferring models start from blackout_end
+            hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
+
             # If a specific artist was requested, use them exclusively (hard assignment)
             if assigned_hair and f"hair::{assigned_hair}" in self.calendars:
-                best_slot = self._find_slot("hair", f"hair::{assigned_hair}", day_start, group_key, model_busy)
+                for search_start in hair_search_starts:
+                    best_slot = self._find_slot("hair", f"hair::{assigned_hair}", search_start, group_key, model_busy)
+                    if best_slot:
+                        break
                 best_candidate = assigned_hair if best_slot else None
             # Otherwise find best slot: fewest current bookings first, then earliest start as tiebreaker
             if not best_slot:
-                for candidate in all_hair:
-                    slot = self._find_slot("hair", f"hair::{candidate}", day_start, group_key, model_busy)
-                    if slot:
-                        cand_load = self._booking_count(candidate)
-                        best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
-                        if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
-                            best_slot, best_candidate = slot, candidate
+                for search_start in hair_search_starts:
+                    for candidate in all_hair:
+                        slot = self._find_slot("hair", f"hair::{candidate}", search_start, group_key, model_busy)
+                        if slot:
+                            cand_load = self._booking_count(candidate)
+                            best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
+                            if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
+                                best_slot, best_candidate = slot, candidate
+                    if best_slot:
+                        break
             # Last resort: all artists regardless of capacity (avoids blank "—" times)
             if not best_slot:
                 all_hair_any = [
@@ -325,19 +350,28 @@ class Scheduler:
                 and self._booking_count(a_name) < self.artists.get(a_name, {}).get("max_models", 6)
             ]
             best_slot, best_candidate = None, None
+            # Mirror the hair stagger: odd-indexed models prefer afternoon makeup too
+            makeup_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
+
             # If a specific artist was requested, use them exclusively (hard assignment)
             if assigned_mu and f"makeup::{assigned_mu}" in self.calendars:
-                best_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", day_start, group_key, model_busy)
+                for search_start in makeup_search_starts:
+                    best_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", search_start, group_key, model_busy)
+                    if best_slot:
+                        break
                 best_candidate = assigned_mu if best_slot else None
             # Otherwise find best slot: fewest current bookings first, then earliest start as tiebreaker
             if not best_slot:
-                for candidate in all_makeup:
-                    slot = self._find_slot("makeup", f"makeup::{candidate}", day_start, group_key, model_busy)
-                    if slot:
-                        cand_load = self._booking_count(candidate)
-                        best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
-                        if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
-                            best_slot, best_candidate = slot, candidate
+                for search_start in makeup_search_starts:
+                    for candidate in all_makeup:
+                        slot = self._find_slot("makeup", f"makeup::{candidate}", search_start, group_key, model_busy)
+                        if slot:
+                            cand_load = self._booking_count(candidate)
+                            best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
+                            if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
+                                best_slot, best_candidate = slot, candidate
+                    if best_slot:
+                        break
             # Last resort: all artists regardless of capacity (avoids blank "—" times)
             if not best_slot:
                 all_makeup_any = [
@@ -391,8 +425,8 @@ class Scheduler:
                 return 2  # schedule last — no rehearsal blackout gives max flexibility
             return 1  # group1
 
-        for model in sorted(self.models, key=priority):
-            self.schedule.append(self._schedule_model(model))
+        for stagger_idx, model in enumerate(sorted(self.models, key=priority)):
+            self.schedule.append(self._schedule_model(model, stagger_idx=stagger_idx))
 
         return self.schedule
 
