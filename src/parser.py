@@ -103,16 +103,19 @@ GROUP_ROW_PATTERNS = [
     ("group1",           ["group 1", "group1", "runway part 1", "runway part1"]),
     ("group2",           ["group 2", "group2", "runway part 2", "runway part2"]),
     ("hope_ambassador",  ["hope ambassador", "hope ambassadors", "hope amb"]),
-    ("board_member",     ["board member", "board members"]),
+    ("board_member",     ["board member", "board members", "bad", "bad members"]),
 ]
 
 # Keywords that indicate a row is a section/group header rather than a person
-_HEADER_KEYWORDS = ["rehearsal", "runway", "group", "ambassador", "board member"]
+_HEADER_KEYWORDS = ["rehearsal", "runway", "group", "ambassador", "board member", "bad"]
 
 # Suffixes that may be appended to a real person's name indicating their group
 _NAME_SUFFIXES = {
     "board member": "board_member",
     "board members": "board_member",
+    "bad member": "board_member",
+    "bad members": "board_member",
+    "bad": "board_member",
     "hope ambassador": "hope_ambassador",
     "hope ambassadors": "hope_ambassador",
 }

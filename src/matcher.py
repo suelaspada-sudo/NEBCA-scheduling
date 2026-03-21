@@ -188,13 +188,10 @@ def run_matching(models: list[dict], artists: list[dict]) -> list[dict]:
     Run hair + makeup matching and attach results to models.
     Returns updated models list.
     """
-    # If a model has the same artist pre-assigned for both hair and makeup,
-    # clear the makeup pre-assignment so it gets re-matched to a different artist.
-    for model in models:
-        hair = model.get("assigned_hair_stylist", "").strip()
-        makeup = model.get("assigned_makeup_artist", "").strip()
-        if hair and makeup and hair.lower() == makeup.lower():
-            model["assigned_makeup_artist"] = ""
+    # Note: if a model has the same artist pre-assigned for both hair and makeup
+    # (e.g. the model explicitly requested Carol for both), we honour that request.
+    # The scheduler's _find_slot already handles "both" artists correctly so
+    # consecutive appointments with the same provider will not double-book.
 
     hair_assignments = match_models_to_artists(models, artists, "hair")
     makeup_assignments = match_models_to_artists(models, artists, "makeup", other_assignments=hair_assignments)

@@ -64,7 +64,7 @@ GROUP_LABELS = {
     "group1":          ["group 1", "group1", "1"],
     "group2":          ["group 2", "group2", "2"],
     "hope_ambassador": ["hope ambassador", "hope ambassadors", "ha", "hope amb"],
-    "board_member":    ["board member", "board members", "board"],
+    "board_member":    ["board member", "board members", "board", "bad", "bad member", "bad members"],
 }
 
 # These are populated by Scheduler.__init__ with the real event date
@@ -152,12 +152,33 @@ class Scheduler:
         for i in range(num_portrait_slots):
             self.calendars[f"portrait::slot{i+1}"] = ProviderCalendar(f"Portrait Slot {i+1}", "portrait")
 
-        # Pre-book a 30-minute break for every provider at 2:30–3:00 PM
-        # (sits naturally between the group2 blackout 1:30–2:30 and group1 blackout 3:00–4:00)
-        break_start = _make_dt(event_date, 14, 30)
-        break_end   = _make_dt(event_date, 15, 0)
-        for cal in self.calendars.values():
-            cal.book(break_start, break_end, "__break__")
+        # Pre-book staggered 30-minute breaks (14:15, 14:30, or 14:45 start) for artists.
+        # Staggering prevents every artist from being on break at the same time while still
+        # fitting between the group2 blackout (1:30–2:30) and group1 blackout (3:00–4:00).
+        # Portrait slots always break at 14:30 (fixed).
+        _break_offsets = [
+            timedelta(minutes=-15),  # 14:15 – 14:45
+            timedelta(minutes=0),    # 14:30 – 15:00
+            timedelta(minutes=15),   # 14:45 – 15:15
+        ]
+        _base_break = _make_dt(event_date, 14, 30)
+        _break_dur  = timedelta(minutes=30)
+
+        # Group calendars by unique artist name so "both" artists get a consistent break time
+        artist_names_ordered = sorted(
+            set(cal.name for key, cal in self.calendars.items() if not key.startswith("portrait::"))
+        )
+        _name_to_break: dict[str, tuple] = {}
+        for i, aname in enumerate(artist_names_ordered):
+            b_start = _base_break + _break_offsets[i % len(_break_offsets)]
+            _name_to_break[aname] = (b_start, b_start + _break_dur)
+
+        for key, cal in self.calendars.items():
+            if key.startswith("portrait::"):
+                cal.book(_base_break, _base_break + _break_dur, "__break__")
+            else:
+                b_start, b_end = _name_to_break[cal.name]
+                cal.book(b_start, b_end, "__break__")
 
         self.schedule: list[dict] = []
 
@@ -258,14 +279,14 @@ class Scheduler:
             if assigned_hair and f"hair::{assigned_hair}" in self.calendars:
                 best_slot = self._find_slot("hair", f"hair::{assigned_hair}", day_start, group_key, model_busy)
                 best_candidate = assigned_hair if best_slot else None
-            # Otherwise find earliest available slot; break ties by fewest current bookings
+            # Otherwise find best slot: fewest current bookings first, then earliest start as tiebreaker
             if not best_slot:
                 for candidate in all_hair:
                     slot = self._find_slot("hair", f"hair::{candidate}", day_start, group_key, model_busy)
                     if slot:
                         cand_load = self._booking_count(candidate)
-                        best_load = self._booking_count(best_candidate) if best_candidate else 0
-                        if best_slot is None or slot[0] < best_slot[0] or (slot[0] == best_slot[0] and cand_load < best_load):
+                        best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
+                        if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
                             best_slot, best_candidate = slot, candidate
             if best_slot:
                 start, end = best_slot
@@ -279,11 +300,13 @@ class Scheduler:
         if model.get("wants_makeup", True):
             assigned_mu = model.get("assigned_makeup_artist", "")
             booked_hair = appointments.get("hair", {}).get("provider", "")
+            # Allow the same artist for both only when explicitly pre-assigned for makeup too.
+            same_person_requested = bool(assigned_mu and assigned_mu == booked_hair)
             all_makeup = [
                 a_name for key in self.calendars
                 if key.startswith("makeup::")
                 for a_name in [key[len("makeup::"):]]
-                if a_name != booked_hair
+                if (a_name != booked_hair or same_person_requested)
                 and self.artists.get(a_name, {}).get("role") in ("makeup", "both")
                 and self._booking_count(a_name) < self.artists.get(a_name, {}).get("max_models", 6)
             ]
@@ -292,14 +315,14 @@ class Scheduler:
             if assigned_mu and f"makeup::{assigned_mu}" in self.calendars:
                 best_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", day_start, group_key, model_busy)
                 best_candidate = assigned_mu if best_slot else None
-            # Otherwise find earliest available slot; break ties by fewest current bookings
+            # Otherwise find best slot: fewest current bookings first, then earliest start as tiebreaker
             if not best_slot:
                 for candidate in all_makeup:
                     slot = self._find_slot("makeup", f"makeup::{candidate}", day_start, group_key, model_busy)
                     if slot:
                         cand_load = self._booking_count(candidate)
-                        best_load = self._booking_count(best_candidate) if best_candidate else 0
-                        if best_slot is None or slot[0] < best_slot[0] or (slot[0] == best_slot[0] and cand_load < best_load):
+                        best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
+                        if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
                             best_slot, best_candidate = slot, candidate
             if best_slot:
                 start, end = best_slot
