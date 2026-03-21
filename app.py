@@ -236,6 +236,12 @@ def artists():
     return render_template("artists.html", artists=STATE["artists"])
 
 
+@app.route("/debug/artists")
+def debug_artists():
+    from flask import jsonify
+    return jsonify([{"name": a["name"], "role": a["role"]} for a in STATE["artists"]])
+
+
 @app.route("/schedule/providers")
 def provider_schedules():
     if not STATE["provider_schedules"]:

@@ -161,6 +161,14 @@ class Scheduler:
 
         self.schedule: list[dict] = []
 
+    def _booking_count(self, artist_name: str) -> int:
+        """Total non-break appointments booked for an artist across all their calendars."""
+        total = 0
+        for key, cal in self.calendars.items():
+            if cal.name == artist_name:
+                total += sum(1 for _, _, m in cal.slots if m != "__break__")
+        return total
+
     def _find_slot(
         self,
         service: str,
@@ -243,18 +251,22 @@ class Scheduler:
                 if key.startswith("hair::")
                 for a_name in [key[len("hair::"):]]
                 if self.artists.get(a_name, {}).get("role") in ("hair", "both")
+                and self._booking_count(a_name) < self.artists.get(a_name, {}).get("max_models", 6)
             ]
             best_slot, best_candidate = None, None
             # If a specific artist was requested, use them exclusively (hard assignment)
             if assigned_hair and f"hair::{assigned_hair}" in self.calendars:
                 best_slot = self._find_slot("hair", f"hair::{assigned_hair}", day_start, group_key, model_busy)
                 best_candidate = assigned_hair if best_slot else None
-            # Otherwise find earliest available slot across all artists
+            # Otherwise find earliest available slot; break ties by fewest current bookings
             if not best_slot:
                 for candidate in all_hair:
                     slot = self._find_slot("hair", f"hair::{candidate}", day_start, group_key, model_busy)
-                    if slot and (best_slot is None or slot[0] < best_slot[0]):
-                        best_slot, best_candidate = slot, candidate
+                    if slot:
+                        cand_load = self._booking_count(candidate)
+                        best_load = self._booking_count(best_candidate) if best_candidate else 0
+                        if best_slot is None or slot[0] < best_slot[0] or (slot[0] == best_slot[0] and cand_load < best_load):
+                            best_slot, best_candidate = slot, candidate
             if best_slot:
                 start, end = best_slot
                 self._book("hair", f"hair::{best_candidate}", start, end, name)
@@ -273,18 +285,22 @@ class Scheduler:
                 for a_name in [key[len("makeup::"):]]
                 if a_name != booked_hair
                 and self.artists.get(a_name, {}).get("role") in ("makeup", "both")
+                and self._booking_count(a_name) < self.artists.get(a_name, {}).get("max_models", 6)
             ]
             best_slot, best_candidate = None, None
             # If a specific artist was requested, use them exclusively (hard assignment)
             if assigned_mu and f"makeup::{assigned_mu}" in self.calendars:
                 best_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", day_start, group_key, model_busy)
                 best_candidate = assigned_mu if best_slot else None
-            # Otherwise find earliest available slot across all artists
+            # Otherwise find earliest available slot; break ties by fewest current bookings
             if not best_slot:
                 for candidate in all_makeup:
                     slot = self._find_slot("makeup", f"makeup::{candidate}", day_start, group_key, model_busy)
-                    if slot and (best_slot is None or slot[0] < best_slot[0]):
-                        best_slot, best_candidate = slot, candidate
+                    if slot:
+                        cand_load = self._booking_count(candidate)
+                        best_load = self._booking_count(best_candidate) if best_candidate else 0
+                        if best_slot is None or slot[0] < best_slot[0] or (slot[0] == best_slot[0] and cand_load < best_load):
+                            best_slot, best_candidate = slot, candidate
             if best_slot:
                 start, end = best_slot
                 self._book("makeup", f"makeup::{best_candidate}", start, end, name)

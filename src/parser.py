@@ -254,21 +254,21 @@ GLAM_SECTION_PATTERNS = [
 
 def _detect_glam_section_row(row: pd.Series) -> str | None:
     """
-    Scan ALL cells in a row for a section header label.
-    The label may be in any column (Google Sheets export can place it in col A
-    which becomes 'Unnamed: 0', not 'First Name').
-    A row is a section header if one cell matches a label AND the row has
-    very few non-empty cells (no email, no cell number, etc.).
+    Detect section header rows (e.g. 'Makeup', 'Hair', 'Hair & Makeup').
+    In Google Sheets exports the label sits in col A ('Unnamed: 0') and every
+    other column is blank — so we require an EXACT match against known labels
+    (no startswith) to avoid matching artist names/emails that happen to start
+    with 'hair' or 'makeup'.
     """
     non_empty = [str(v).strip() for v in row.values if not pd.isna(v) and str(v).strip()]
-    if len(non_empty) > 3:
-        return None  # too many values — this is a real artist row
-    for text in non_empty:
-        t = text.lower().strip()
-        for role, patterns in GLAM_SECTION_PATTERNS:
-            for p in patterns:
-                if t == p or t.startswith(p):
-                    return role
+    # A section header row has exactly one non-empty cell
+    if len(non_empty) != 1:
+        return None
+    t = non_empty[0].lower().strip()
+    for role, patterns in GLAM_SECTION_PATTERNS:
+        for p in patterns:
+            if t == p:
+                return role
     return None
 
 
@@ -304,6 +304,7 @@ def parse_glam_info(path: str | Path) -> list[dict]:
         # col A ("Unnamed: 0") rather than "First Name", so first/last would be empty.
         section = _detect_glam_section_row(row)
         if section:
+            print(f"[DEBUG] Detected section header: {section!r} from row values: {[str(v).strip() for v in row.values if not __import__('pandas').isna(v) and str(v).strip()]}")
             current_section_role = section
             continue
 
