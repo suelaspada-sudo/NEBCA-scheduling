@@ -203,6 +203,37 @@ class Scheduler:
                         served.add(m)
         return len(served)
 
+    def _resolve_calendar_key(self, role: str, name: str) -> str | None:
+        """
+        Return the exact calendar key for *role* (hair/makeup) whose artist name
+        matches *name*, using case-insensitive substring matching.
+
+        Exact match is tried first, then prefix match (name starts with the
+        candidate), then substring match.  Returns None if nothing matches.
+
+        This tolerates small differences between the name typed in the models
+        master sheet and the name on the glam info CSV (e.g. different
+        capitalisation, truncated last name, extra spaces).
+        """
+        prefix = f"{role}::"
+        needle = name.strip().lower()
+        exact = f"{prefix}{name}"
+        if exact in self.calendars:
+            return exact
+
+        candidates = [k for k in self.calendars if k.startswith(prefix)]
+        # Prefer the one whose artist-name contains the needle as a prefix
+        for key in candidates:
+            artist = key[len(prefix):].lower()
+            if artist.startswith(needle) or needle.startswith(artist):
+                return key
+        # Fall back to plain substring containment
+        for key in candidates:
+            artist = key[len(prefix):].lower()
+            if needle in artist or artist in needle:
+                return key
+        return None
+
     def _find_slot(
         self,
         service: str,
@@ -305,12 +336,13 @@ class Scheduler:
             hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
 
             # If a specific artist was requested, use them exclusively (hard assignment)
-            if assigned_hair and f"hair::{assigned_hair}" in self.calendars:
+            hair_cal_key = self._resolve_calendar_key("hair", assigned_hair) if assigned_hair else None
+            if hair_cal_key:
                 for search_start in hair_search_starts:
-                    best_slot = self._find_slot("hair", f"hair::{assigned_hair}", search_start, group_key, model_busy)
+                    best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy)
                     if best_slot:
                         break
-                best_candidate = assigned_hair if best_slot else None
+                best_candidate = hair_cal_key[len("hair::"):] if best_slot else None
             # Otherwise find best slot: fewest current bookings first, then earliest start as tiebreaker
             if not best_slot:
                 for search_start in hair_search_starts:
@@ -364,12 +396,13 @@ class Scheduler:
             makeup_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
 
             # If a specific artist was requested, use them exclusively (hard assignment)
-            if assigned_mu and f"makeup::{assigned_mu}" in self.calendars:
+            mu_cal_key = self._resolve_calendar_key("makeup", assigned_mu) if assigned_mu else None
+            if mu_cal_key:
                 for search_start in makeup_search_starts:
-                    best_slot = self._find_slot("makeup", f"makeup::{assigned_mu}", search_start, group_key, model_busy)
+                    best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy)
                     if best_slot:
                         break
-                best_candidate = assigned_mu if best_slot else None
+                best_candidate = mu_cal_key[len("makeup::"):] if best_slot else None
             # Otherwise find best slot: fewest current bookings first, then earliest start as tiebreaker
             if not best_slot:
                 for search_start in makeup_search_starts:
