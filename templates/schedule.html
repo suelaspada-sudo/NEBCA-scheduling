@@ -31,6 +31,13 @@
           <td>{% if row["Makeup Time"] %}<span class="badge badge-blue">{{ row["Makeup Time"] }}</span>{% else %}<span style="color:#aaa">—</span>{% endif %}</td>
           <td>{% if row.Portrait %}<span class="badge badge-green">{{ row.Portrait }}</span>{% else %}<span style="color:#aaa;font-size:0.7rem">not scheduled</span>{% endif %}</td>
         </tr>
+        {% if row.Warnings %}
+        <tr>
+          <td colspan="8" style="background:#fffbe6;color:#7a5c00;font-size:0.78rem;padding:4px 12px;">
+            ⚠ {% for w in row.Warnings %}{{ w }}{% if not loop.last %} &nbsp;|&nbsp; {% endif %}{% endfor %}
+          </td>
+        </tr>
+        {% endif %}
         {% else %}
         <tr><td colspan="11" style="text-align:center;color:#aaa;padding:32px;">No schedule generated yet.</td></tr>
         {% endfor %}

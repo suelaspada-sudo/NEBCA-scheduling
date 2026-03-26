@@ -322,6 +322,7 @@ class Scheduler:
 
         # ── 1. Hair (anytime, independent of makeup) ───────────────────────────
         hair_end = day_start
+        warnings: list[str] = []
         if model.get("wants_hair", True):
             assigned_hair = model.get("assigned_hair_stylist", "")
             all_hair = [
@@ -337,6 +338,10 @@ class Scheduler:
 
             # If a specific artist was requested, use them exclusively (hard assignment)
             hair_cal_key = self._resolve_calendar_key("hair", assigned_hair) if assigned_hair else None
+            if assigned_hair and not hair_cal_key:
+                msg = f"[WARN] {name}: hair artist '{assigned_hair}' not found in glam info — assigned to next available."
+                print(msg)
+                warnings.append(msg[7:])  # strip "[WARN] " prefix for UI
             if hair_cal_key:
                 for search_start in hair_search_starts:
                     best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy)
@@ -397,6 +402,10 @@ class Scheduler:
 
             # If a specific artist was requested, use them exclusively (hard assignment)
             mu_cal_key = self._resolve_calendar_key("makeup", assigned_mu) if assigned_mu else None
+            if assigned_mu and not mu_cal_key:
+                msg = f"[WARN] {name}: makeup artist '{assigned_mu}' not found in glam info — assigned to next available."
+                print(msg)
+                warnings.append(msg[7:])
             if mu_cal_key:
                 for search_start in makeup_search_starts:
                     best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy)
@@ -456,6 +465,7 @@ class Scheduler:
             "hair_stylist": model.get("assigned_hair_stylist", ""),
             "makeup_artist": model.get("assigned_makeup_artist", ""),
             "appointments": appointments,
+            "warnings": warnings,
         }
 
     def run(self) -> list[dict]:
@@ -534,5 +544,6 @@ def schedule_to_rows(schedule: list[dict]) -> list[dict]:
             "Makeup Artist": m_p or entry.get("makeup_artist", ""),
             "Makeup Time":   f"{m_s}–{m_e}" if m_s else "",
             "Portrait":      f"{p_s}–{p_e}" if p_s else "",
+            "Warnings":      entry.get("warnings", []),
         })
     return rows
