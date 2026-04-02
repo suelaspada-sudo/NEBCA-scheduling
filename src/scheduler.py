@@ -46,16 +46,16 @@ MASSAGE_SESSION_MIN = 10  # actual displayed appointment length (excludes buffer
 
 # Time-only tuples (hour, minute) — resolved to datetimes in Scheduler.__init__
 _WINDOW_TIMES = {
-    "hair":     ((11, 30), (18, 30)),
-    "makeup":   ((11, 30), (18, 30)),
-    "portrait": ((13, 30), (19, 0)),
+    "hair":     ((11, 30), (18, 0)),
+    "makeup":   ((11, 30), (18, 0)),
+    "portrait": ((13, 30), (18, 0)),
     "massage":  ((9, 0),   (17, 0)),   # 9 AM – 5 PM
 }
 
 _BLACKOUT_TIMES = {
-    "group1":           ((15, 0), (16, 0)),
-    "group2":           ((13, 30), (14, 30)),
-    "hope_ambassador":  ((13, 30), (14, 30)),
+    "group1":           ((15, 0), (16, 0)),   # Rehearsal 2: 3 PM – 4 PM
+    "group2":           ((13, 0), (14, 0)),   # Rehearsal 1: 1 PM – 2 PM
+    "hope_ambassador":  ((13, 0), (14, 0)),   # same as group2
     # board_member: no blackout
 }
 
@@ -536,10 +536,16 @@ class Scheduler:
                 appointments["portrait"] = {"provider": self.calendars[pk].name, "start": start, "end": end}
                 break
 
+        # Show rehearsal time from the sheet if present; otherwise derive from blackout
+        rehearsal_display = model.get("rehearsal_time", "")
+        if not rehearsal_display and group_key and group_key in REHEARSAL_BLACKOUTS:
+            bs, be = REHEARSAL_BLACKOUTS[group_key]
+            rehearsal_display = f"{fmt_time(bs)} – {fmt_time(be)}"
+
         return {
             "model": name,
             "group": model.get("group", ""),
-            "rehearsal_time": model.get("rehearsal_time", ""),
+            "rehearsal_time": rehearsal_display,
             "hair_stylist": model.get("assigned_hair_stylist", ""),
             "makeup_artist": model.get("assigned_makeup_artist", ""),
             "appointments": appointments,
