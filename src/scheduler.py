@@ -372,9 +372,12 @@ class Scheduler:
         prefer_afternoon = (stagger_idx % 2 == 1) and (blackout_end > day_start)
 
         # ── 0. Massage (9 AM – 5 PM, independent of glam) ─────────────────────
+        # Only scheduled when the services CSV marks Chair Massage = Y.
+        # If no services CSV was uploaded, wants_chair_massage defaults to True
+        # so all models still get massages (backwards-compatible).
         warnings: list[str] = []
         massage_keys = sorted(k for k in self.calendars if k.startswith("massage::"))
-        if massage_keys:
+        if massage_keys and model.get("wants_chair_massage", True):
             best_slot, best_key = None, None
             for mk in massage_keys:
                 slot = self._find_slot(

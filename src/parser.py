@@ -282,6 +282,84 @@ def parse_contact_info(path: str | Path) -> dict[str, dict]:
     return contacts
 
 
+# ─── Services / opt-in CSV ────────────────────────────────────────────────────
+
+def _yn(val: str) -> bool:
+    """Return True if the value is a Y/Yes (case-insensitive)."""
+    return val.strip().lower() in ("y", "yes")
+
+
+def parse_services(path: str | Path) -> dict[str, dict]:
+    """
+    Parse the services opt-in CSV (one row per participant).
+
+    Expected headers (Google Form export style — colons are stripped):
+      First name, Last name, Email, Phone number,
+      Lashes, Nail Stamping, Facial, Chair Massage, Hand Massage
+
+    Returns {lowercase_full_name: {wants_chair_massage, wants_hand_massage,
+                                   wants_lashes, wants_nail_stamping,
+                                   wants_facial, email, phone}}
+    """
+    df = pd.read_csv(path, dtype=str)
+    # Strip trailing colons and extra whitespace from column names (Google Forms)
+    df.columns = [c.strip().rstrip(":").strip() for c in df.columns]
+
+    services: dict[str, dict] = {}
+    for _, row in df.iterrows():
+        first = _safe_str(row.get("First name", "") or row.get("First Name", ""))
+        last  = _safe_str(row.get("Last name",  "") or row.get("Last Name",  ""))
+        name  = f"{first} {last}".strip()
+        if not name:
+            continue
+
+        services[name.lower()] = {
+            "wants_chair_massage": _yn(_safe_str(row.get("Chair Massage", ""))),
+            "wants_hand_massage":  _yn(_safe_str(row.get("Hand Massage",  ""))),
+            "wants_lashes":        _yn(_safe_str(row.get("Lashes",        ""))),
+            "wants_nail_stamping": _yn(_safe_str(row.get("Nail Stamping", ""))),
+            "wants_facial":        _yn(_safe_str(row.get("Facial",        ""))),
+            "email": _safe_str(row.get("Email", "") or row.get("E-mail", "")),
+            "phone": _safe_str(row.get("Phone number", "") or row.get("Phone", "")),
+        }
+    return services
+
+
+def merge_services(models: list[dict], services: dict[str, dict]) -> list[dict]:
+    """
+    Overlay services opt-in data onto the models list, matched by name.
+    Models not found in the services dict keep wants_massage=False so that
+    uploading the CSV is the authoritative source for who gets a massage.
+    """
+    for model in models:
+        key = model["name"].lower().strip()
+        svc = services.get(key)
+        if svc is None:
+            # Try last-name-only fallback
+            last = key.split()[-1] if key else ""
+            svc = services.get(last)
+
+        if svc:
+            model["wants_chair_massage"] = svc["wants_chair_massage"]
+            model["wants_hand_massage"]  = svc["wants_hand_massage"]
+            model["wants_lashes"]        = svc["wants_lashes"]
+            model["wants_nail_stamping"] = svc["wants_nail_stamping"]
+            model["wants_facial"]        = svc["wants_facial"]
+            # Fill in contact info if not already present
+            if not model.get("email") and svc.get("email"):
+                model["email"] = svc["email"]
+            if not model.get("phone") and svc.get("phone"):
+                model["phone"] = svc["phone"]
+        else:
+            # Not in services CSV → no massage
+            model.setdefault("wants_chair_massage", False)
+            model.setdefault("wants_hand_massage",  False)
+            model.setdefault("wants_lashes",        False)
+            model.setdefault("wants_nail_stamping", False)
+            model.setdefault("wants_facial",        False)
+    return models
+
+
 # ─── Glam Info ────────────────────────────────────────────────────────────────
 
 # Section header rows in the glam sheet (First Name cell only, Last Name empty)
