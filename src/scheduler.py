@@ -399,130 +399,53 @@ class Scheduler:
                     "end": session_end,   # display only the 10-min session
                 }
 
-        # ── 1. Hair (anytime, independent of makeup) ───────────────────────────
+        # ── 1. Hair ────────────────────────────────────────────────────────────
+        # Only schedule if the sheet has an assigned stylist — blank = no hair.
         hair_end = day_start
-        if model.get("wants_hair", True):
-            assigned_hair = model.get("assigned_hair_stylist", "")
-            all_hair = [
-                a_name for key in self.calendars
-                if key.startswith("hair::")
-                for a_name in [key[len("hair::"):]]
-                if self.artists.get(a_name, {}).get("role") in ("hair", "both")
-                and self._booking_count(a_name) < self.artists.get(a_name, {}).get("max_models", 6)
-            ]
-            best_slot, best_candidate = None, None
-            # Determine search start: afternoon-preferring models start from blackout_end
+        assigned_hair = model.get("assigned_hair_stylist", "").strip()
+        if assigned_hair:
             hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
-
-            # If a specific artist was requested, use them exclusively (hard assignment)
-            hair_cal_key = self._resolve_calendar_key("hair", assigned_hair) if assigned_hair else None
-            if assigned_hair and not hair_cal_key:
-                msg = f"[WARN] {name}: hair artist '{assigned_hair}' not found in glam info — assigned to next available."
+            hair_cal_key = self._resolve_calendar_key("hair", assigned_hair)
+            if not hair_cal_key:
+                msg = f"[WARN] {name}: hair artist '{assigned_hair}' not found."
                 print(msg)
-                warnings.append(msg[7:])  # strip "[WARN] " prefix for UI
-            if hair_cal_key:
+                warnings.append(msg[7:])
+            else:
+                best_slot = None
                 for search_start in hair_search_starts:
                     best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy)
                     if best_slot:
                         break
-                best_candidate = hair_cal_key[len("hair::"):] if best_slot else None
-            # Otherwise find best slot: fewest current bookings first, then earliest start as tiebreaker
-            if not best_slot:
-                for search_start in hair_search_starts:
-                    for candidate in all_hair:
-                        slot = self._find_slot("hair", f"hair::{candidate}", search_start, group_key, model_busy)
-                        if slot:
-                            cand_load = self._booking_count(candidate)
-                            best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
-                            if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
-                                best_slot, best_candidate = slot, candidate
-                    if best_slot:
-                        break
-            # Last resort: all artists regardless of capacity (avoids blank "—" times)
-            if not best_slot:
-                all_hair_any = [
-                    key[len("hair::"):] for key in self.calendars
-                    if key.startswith("hair::")
-                    and self.artists.get(key[len("hair::"):], {}).get("role") in ("hair", "both")
-                ]
-                for candidate in all_hair_any:
-                    slot = self._find_slot("hair", f"hair::{candidate}", day_start, group_key, model_busy)
-                    if slot:
-                        cand_load = self._booking_count(candidate)
-                        best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
-                        if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
-                            best_slot, best_candidate = slot, candidate
-            if best_slot:
-                start, end = best_slot
-                self._book("hair", f"hair::{best_candidate}", start, end, name)
-                model_busy.append((start, end))
-                appointments["hair"] = {"provider": best_candidate, "start": start, "end": end}
-                hair_end = end
+                if best_slot:
+                    start, end = best_slot
+                    self._book("hair", hair_cal_key, start, end, name)
+                    model_busy.append((start, end))
+                    appointments["hair"] = {"provider": hair_cal_key[len("hair::"):], "start": start, "end": end}
+                    hair_end = end
 
-        # ── 3. Makeup (anytime, independent of hair) ───────────────────────────
+        # ── 3. Makeup ──────────────────────────────────────────────────────────
+        # Only schedule if the sheet has an assigned artist — blank = no makeup.
         makeup_end = day_start
-        if model.get("wants_makeup", True):
-            assigned_mu = model.get("assigned_makeup_artist", "")
-            booked_hair = appointments.get("hair", {}).get("provider", "")
-            # Allow the same artist for both only when explicitly pre-assigned for makeup too.
-            same_person_requested = bool(assigned_mu and assigned_mu == booked_hair)
-            all_makeup = [
-                a_name for key in self.calendars
-                if key.startswith("makeup::")
-                for a_name in [key[len("makeup::"):]]
-                if (a_name != booked_hair or same_person_requested)
-                and self.artists.get(a_name, {}).get("role") in ("makeup", "both")
-                and self._booking_count(a_name) < self.artists.get(a_name, {}).get("max_models", 6)
-            ]
-            best_slot, best_candidate = None, None
-            # Mirror the hair stagger: odd-indexed models prefer afternoon makeup too
+        assigned_mu = model.get("assigned_makeup_artist", "").strip()
+        if assigned_mu:
             makeup_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
-
-            # If a specific artist was requested, use them exclusively (hard assignment)
-            mu_cal_key = self._resolve_calendar_key("makeup", assigned_mu) if assigned_mu else None
-            if assigned_mu and not mu_cal_key:
-                msg = f"[WARN] {name}: makeup artist '{assigned_mu}' not found in glam info — assigned to next available."
+            mu_cal_key = self._resolve_calendar_key("makeup", assigned_mu)
+            if not mu_cal_key:
+                msg = f"[WARN] {name}: makeup artist '{assigned_mu}' not found."
                 print(msg)
                 warnings.append(msg[7:])
-            if mu_cal_key:
+            else:
+                best_slot = None
                 for search_start in makeup_search_starts:
                     best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy)
                     if best_slot:
                         break
-                best_candidate = mu_cal_key[len("makeup::"):] if best_slot else None
-            # Otherwise find best slot: fewest current bookings first, then earliest start as tiebreaker
-            if not best_slot:
-                for search_start in makeup_search_starts:
-                    for candidate in all_makeup:
-                        slot = self._find_slot("makeup", f"makeup::{candidate}", search_start, group_key, model_busy)
-                        if slot:
-                            cand_load = self._booking_count(candidate)
-                            best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
-                            if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
-                                best_slot, best_candidate = slot, candidate
-                    if best_slot:
-                        break
-            # Last resort: all artists regardless of capacity (avoids blank "—" times)
-            if not best_slot:
-                all_makeup_any = [
-                    key[len("makeup::"):] for key in self.calendars
-                    if key.startswith("makeup::")
-                    and (key[len("makeup::"):] != booked_hair or same_person_requested)
-                    and self.artists.get(key[len("makeup::"):], {}).get("role") in ("makeup", "both")
-                ]
-                for candidate in all_makeup_any:
-                    slot = self._find_slot("makeup", f"makeup::{candidate}", day_start, group_key, model_busy)
-                    if slot:
-                        cand_load = self._booking_count(candidate)
-                        best_load = self._booking_count(best_candidate) if best_candidate else float("inf")
-                        if best_slot is None or cand_load < best_load or (cand_load == best_load and slot[0] < best_slot[0]):
-                            best_slot, best_candidate = slot, candidate
-            if best_slot:
-                start, end = best_slot
-                self._book("makeup", f"makeup::{best_candidate}", start, end, name)
-                model_busy.append((start, end))
-                appointments["makeup"] = {"provider": best_candidate, "start": start, "end": end}
-                makeup_end = end
+                if best_slot:
+                    start, end = best_slot
+                    self._book("makeup", mu_cal_key, start, end, name)
+                    model_busy.append((start, end))
+                    appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
+                    makeup_end = end
 
         # ── 4. Portrait (after hair + makeup, within portrait window) ──────────
         glam_done = max(hair_end, makeup_end)
