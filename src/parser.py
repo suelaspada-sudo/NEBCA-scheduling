@@ -154,7 +154,9 @@ def _strip_name_suffix(name: str) -> tuple[str, str | None]:
     Strip group suffixes and noise words from a person's name.
     Returns (clean_name, group_key_or_None).
     """
-    name_lower = name.lower().strip()
+    # Normalize all whitespace (Google Sheets exports newlines inside cells)
+    name = re.sub(r'\s+', ' ', name).strip()
+    name_lower = name.lower()
     # Check group-bearing suffixes first (e.g. "board member")
     for suffix, group_key in _NAME_SUFFIXES.items():
         if name_lower.endswith(suffix):
@@ -246,6 +248,38 @@ def parse_models_master(path: str | Path) -> list[dict]:
         }
         models.append(model)
     return models
+
+
+# ─── Contact Info ─────────────────────────────────────────────────────────────
+
+def parse_contact_info(path: str | Path) -> dict[str, dict]:
+    """
+    Parse a contact-info CSV and return a dict keyed by lowercase model name.
+    Accepts any CSV that has a Name (or First Name + Last Name) column plus
+    Email and Phone columns.
+
+    Returns: { "jane smith": {"email": "...", "phone": "..."}, ... }
+    """
+    df = pd.read_csv(path, dtype=str)
+    df.columns = [c.strip() for c in df.columns]
+    contacts: dict[str, dict] = {}
+    for _, row in df.iterrows():
+        name = _safe_str(row.get("Name", ""))
+        if not name:
+            fn = _safe_str(row.get("First Name", ""))
+            ln = _safe_str(row.get("Last Name", ""))
+            name = f"{fn} {ln}".strip()
+        if not name:
+            continue
+        email = _safe_str(
+            row.get("Email", "") or row.get("E-mail", "") or row.get("email", "")
+        )
+        phone = _safe_str(
+            row.get("Phone", "") or row.get("Phone #", "")
+            or row.get("Cell", "") or row.get("phone", "")
+        )
+        contacts[name.lower()] = {"email": email, "phone": phone}
+    return contacts
 
 
 # ─── Glam Info ────────────────────────────────────────────────────────────────

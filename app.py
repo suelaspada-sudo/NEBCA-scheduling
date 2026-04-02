@@ -13,8 +13,7 @@ from flask import (
 import io
 import pandas as pd
 
-from src.parser import parse_models_master, parse_glam_info, parse_questionnaire, merge_model_data
-from src.matcher import run_matching, get_match_quality_report
+from src.parser import parse_models_master, parse_glam_info, parse_questionnaire, merge_model_data, parse_contact_info
 from src.scheduler import Scheduler, schedule_to_rows
 from src.exporter import schedule_to_wix_csv, schedule_to_master_csv
 
@@ -28,10 +27,10 @@ UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 STATE = {
     "models": [],
     "artists": [],
+    "contacts": {},   # {lowercase_name: {email, phone}} from contact info CSV
     "schedule": [],
     "schedule_rows": [],
     "provider_schedules": [],
-    "match_report": [],
 }
 
 
@@ -46,21 +45,16 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    files = {
-        "models_master": request.files.get("models_master"),
-        "glam_info": request.files.get("glam_info"),
-        "questionnaire": request.files.get("questionnaire"),
-    }
-
+    file_keys = ["models_master", "glam_info", "questionnaire", "contact_info"]
     saved = {}
-    for key, f in files.items():
+    for key in file_keys:
+        f = request.files.get(key)
         if f and f.filename:
             path = UPLOAD_FOLDER / f"{key}.csv"
             f.save(path)
             saved[key] = path
 
     errors = []
-
     try:
         if "models_master" in saved:
             STATE["models"] = parse_models_master(saved["models_master"])
@@ -70,6 +64,8 @@ def upload():
             responses = parse_questionnaire(saved["questionnaire"])
             if STATE["models"]:
                 STATE["models"] = merge_model_data(STATE["models"], responses)
+        if "contact_info" in saved:
+            STATE["contacts"] = parse_contact_info(saved["contact_info"])
     except Exception as e:
         errors.append(f"Parse error: {e}")
 
@@ -77,7 +73,12 @@ def upload():
         for e in errors:
             flash(e, "error")
     else:
-        flash(f"Loaded {len(STATE['models'])} models and {len(STATE['artists'])} glam artists.", "success")
+        parts = [f"{len(STATE['models'])} models"]
+        if STATE["artists"]:
+            parts.append(f"{len(STATE['artists'])} glam artists")
+        if STATE["contacts"]:
+            parts.append(f"{len(STATE['contacts'])} contacts")
+        flash(f"Loaded {', '.join(parts)}.", "success")
 
     return redirect(url_for("index"))
 
@@ -87,9 +88,13 @@ def upload():
 @app.route("/configure", methods=["GET", "POST"])
 def configure():
     if request.method == "POST":
+        raw_names = request.form.get("massage_provider_names", "")
+        massage_names = [n.strip() for n in raw_names.split(",") if n.strip()]
         config = {
             "event_date": request.form.get("event_date", "2026-01-01"),
             "num_portrait_slots": int(request.form.get("num_portrait_slots", 1)),
+            "num_massage_tables": int(request.form.get("num_massage_tables", 1)),
+            "massage_provider_names": massage_names,
             "hair_duration": int(request.form.get("hair_duration", 45)),
             "makeup_duration": int(request.form.get("makeup_duration", 45)),
         }
@@ -112,48 +117,11 @@ def _load_config() -> dict:
     return {
         "event_date": "2026-04-25",
         "num_portrait_slots": 1,
+        "num_massage_tables": 1,
+        "massage_provider_names": [],
         "hair_duration": 45,
         "makeup_duration": 45,
     }
-
-
-# ─── Match ────────────────────────────────────────────────────────────────────
-
-@app.route("/match", methods=["POST"])
-def match():
-    if not STATE["models"] or not STATE["artists"]:
-        flash("Upload all three CSV files first.", "error")
-        return redirect(url_for("index"))
-
-    STATE["models"] = run_matching(STATE["models"], STATE["artists"])
-    STATE["match_report"] = get_match_quality_report(STATE["models"], STATE["artists"])
-    flash(f"Matched {len(STATE['models'])} models to glam artists.", "success")
-    return redirect(url_for("matches"))
-
-
-@app.route("/matches")
-def matches():
-    return render_template("matches.html", report=STATE["match_report"], models=STATE["models"])
-
-
-@app.route("/matches/override", methods=["POST"])
-def override_match():
-    """Allow manual override of a single model's assignments."""
-    model_name = request.form.get("model_name")
-    hair = request.form.get("hair_stylist")
-    makeup = request.form.get("makeup_artist")
-
-    for model in STATE["models"]:
-        if model["name"] == model_name:
-            if hair:
-                model["assigned_hair_stylist"] = hair
-            if makeup:
-                model["assigned_makeup_artist"] = makeup
-            break
-
-    STATE["match_report"] = get_match_quality_report(STATE["models"], STATE["artists"])
-    flash(f"Updated assignments for {model_name}.", "success")
-    return redirect(url_for("matches"))
 
 
 # ─── Schedule ─────────────────────────────────────────────────────────────────
@@ -170,6 +138,8 @@ def run_schedule():
         models=STATE["models"],
         artists=STATE["artists"],
         num_portrait_slots=config["num_portrait_slots"],
+        num_massage_tables=config.get("num_massage_tables", 1),
+        massage_provider_names=config.get("massage_provider_names") or None,
         event_date=config["event_date"],
         hair_duration_min=config["hair_duration"],
         makeup_duration_min=config["makeup_duration"],
@@ -205,6 +175,7 @@ def export_wix():
         STATE["schedule"],
         models_by_name,
         event_date=config["event_date"],
+        contacts=STATE.get("contacts", {}),
     )
     return send_file(
         io.BytesIO(csv_str.encode()),
@@ -238,7 +209,6 @@ def artists():
 
 @app.route("/debug/artists")
 def debug_artists():
-    from flask import jsonify
     return jsonify([{"name": a["name"], "role": a["role"]} for a in STATE["artists"]])
 
 

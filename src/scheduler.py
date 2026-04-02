@@ -39,13 +39,17 @@ DURATIONS = {
     "hair": 45,
     "makeup": 45,
     "portrait": 5,
+    "massage": 15,   # 10-min session + 5-min buffer in calendar
 }
+
+MASSAGE_SESSION_MIN = 10  # actual displayed appointment length (excludes buffer)
 
 # Time-only tuples (hour, minute) — resolved to datetimes in Scheduler.__init__
 _WINDOW_TIMES = {
     "hair":     ((11, 30), (18, 30)),
     "makeup":   ((11, 30), (18, 30)),
     "portrait": ((13, 30), (19, 0)),
+    "massage":  ((9, 0),   (17, 0)),   # 9 AM – 5 PM
 }
 
 _BLACKOUT_TIMES = {
@@ -118,10 +122,12 @@ class Scheduler:
         models: list[dict],
         artists: list[dict],
         num_portrait_slots: int = 1,
+        num_massage_tables: int = 1,
+        massage_provider_names: list[str] | None = None,
         event_date: str = "2026-01-01",
-        hair_duration_min: int = 60,
-        makeup_duration_min: int = 60,
-        **kwargs,  # absorb removed params (e.g. num_massage_tables) from older app.py
+        hair_duration_min: int = 45,
+        makeup_duration_min: int = 45,
+        **kwargs,
     ):
         global WINDOWS, REHEARSAL_BLACKOUTS
         WINDOWS = {
@@ -142,43 +148,88 @@ class Scheduler:
         DURATIONS["hair"] = hair_duration_min
         DURATIONS["makeup"] = makeup_duration_min
 
-        # Build provider calendars
+        # ── Build provider calendars ──────────────────────────────────────────
+
         self.calendars: dict[str, ProviderCalendar] = {}
 
+        # 1. Glam artists from glam_info CSV
         for a in artists:
             self.calendars[f"hair::{a['name']}"] = ProviderCalendar(a["name"], "hair")
             self.calendars[f"makeup::{a['name']}"] = ProviderCalendar(a["name"], "makeup")
 
+        # 2. Auto-create calendars for any artist named in the models master sheet
+        #    that doesn't already have a calendar.  This ensures the sheet is the
+        #    single source of truth — if a name is written there, it is schedulable
+        #    even if it's missing from the glam info CSV.
+        assigned_names: set[str] = set()
+        for model in self.models:
+            h = model.get("assigned_hair_stylist", "").strip()
+            m_art = model.get("assigned_makeup_artist", "").strip()
+            if h:
+                assigned_names.add(h)
+            if m_art:
+                assigned_names.add(m_art)
+
+        for aname in assigned_names:
+            if aname not in self.artists:
+                self.artists[aname] = {"name": aname, "role": "both", "max_models": 99}
+            if f"hair::{aname}" not in self.calendars:
+                self.calendars[f"hair::{aname}"] = ProviderCalendar(aname, "hair")
+            if f"makeup::{aname}" not in self.calendars:
+                self.calendars[f"makeup::{aname}"] = ProviderCalendar(aname, "makeup")
+
+        # 3. Portrait slots
         for i in range(num_portrait_slots):
             self.calendars[f"portrait::slot{i+1}"] = ProviderCalendar(f"Portrait Slot {i+1}", "portrait")
 
-        # Pre-book staggered 30-minute breaks for artists.
-        # 5 distinct offsets ensure up to 5 artists each get a unique break time;
-        # beyond that they cycle. All break windows sit between the two group
-        # blackouts (group2: 1:30–2:30 PM, group1: 3:00–4:00 PM).
-        # Portrait slots always break at 14:30 (fixed).
-        _break_offsets = [
-            timedelta(minutes=-30),  # 14:00 – 14:30
-            timedelta(minutes=-15),  # 14:15 – 14:45
-            timedelta(minutes=0),    # 14:30 – 15:00
-            timedelta(minutes=15),   # 14:45 – 15:15
-            timedelta(minutes=30),   # 15:00 – 15:30
-        ]
-        _base_break = _make_dt(event_date, 14, 30)
-        _break_dur  = timedelta(minutes=30)
+        # 4. Massage tables — 10-min sessions with 5-min buffer, 9 AM – 5 PM
+        _massage_names = (massage_provider_names or [])[:num_massage_tables]
+        while len(_massage_names) < num_massage_tables:
+            _massage_names.append(f"Massage Table {len(_massage_names) + 1}")
+        for mname in _massage_names:
+            self.calendars[f"massage::{mname}"] = ProviderCalendar(mname, "massage")
+            if mname not in self.artists:
+                self.artists[mname] = {"name": mname, "role": "massage", "max_models": 999}
 
-        # Group calendars by unique artist name so "both" artists get a consistent break time
-        artist_names_ordered = sorted(
-            set(cal.name for key, cal in self.calendars.items() if not key.startswith("portrait::"))
+        # ── Pre-book 30-minute breaks ─────────────────────────────────────────
+
+        _break_dur = timedelta(minutes=30)
+
+        # Glam/portrait breaks: staggered around 2:30 PM (between the two group
+        # rehearsal blackouts).  5 offsets cover most team sizes; they cycle after.
+        _glam_break_offsets = [
+            timedelta(minutes=-30),  # 2:00 – 2:30 PM
+            timedelta(minutes=-15),  # 2:15 – 2:45 PM
+            timedelta(minutes=0),    # 2:30 – 3:00 PM
+            timedelta(minutes=15),   # 2:45 – 3:15 PM
+            timedelta(minutes=30),   # 3:00 – 3:30 PM
+        ]
+        _glam_base = _make_dt(event_date, 14, 30)  # 2:30 PM
+
+        # Portrait: fixed 2:30 PM break
+        _portrait_break = _glam_base
+
+        # Massage: break at 12:30 PM (mid-morning, before glam rush)
+        _massage_break = _make_dt(event_date, 12, 30)
+
+        # Assign each unique glam artist a staggered break slot
+        glam_names_ordered = sorted(
+            set(
+                cal.name
+                for key, cal in self.calendars.items()
+                if not key.startswith("portrait::") and not key.startswith("massage::")
+            )
         )
         _name_to_break: dict[str, tuple] = {}
-        for i, aname in enumerate(artist_names_ordered):
-            b_start = _base_break + _break_offsets[i % len(_break_offsets)]
+        for i, aname in enumerate(glam_names_ordered):
+            b_start = _glam_base + _glam_break_offsets[i % len(_glam_break_offsets)]
             _name_to_break[aname] = (b_start, b_start + _break_dur)
 
         for key, cal in self.calendars.items():
             if key.startswith("portrait::"):
-                cal.book(_base_break, _base_break + _break_dur, "__break__")
+                cal.book(_portrait_break, _portrait_break + _break_dur, "__break__")
+            elif key.startswith("massage::"):
+                cal.book(_massage_break, _massage_break + _break_dur, "__break__")
             else:
                 b_start, b_end = _name_to_break[cal.name]
                 cal.book(b_start, b_end, "__break__")
@@ -320,9 +371,36 @@ class Scheduler:
         )
         prefer_afternoon = (stagger_idx % 2 == 1) and (blackout_end > day_start)
 
+        # ── 0. Massage (9 AM – 5 PM, independent of glam) ─────────────────────
+        warnings: list[str] = []
+        massage_keys = sorted(k for k in self.calendars if k.startswith("massage::"))
+        if massage_keys:
+            best_slot, best_key = None, None
+            for mk in massage_keys:
+                slot = self._find_slot(
+                    "massage", mk, WINDOWS["massage"][0], group_key, model_busy
+                )
+                if slot:
+                    cand_load = self._booking_count(self.calendars[mk].name)
+                    best_load = (
+                        self._booking_count(self.calendars[best_key].name)
+                        if best_key else float("inf")
+                    )
+                    if best_slot is None or cand_load < best_load:
+                        best_slot, best_key = slot, mk
+            if best_slot:
+                cal_start, cal_end = best_slot
+                session_end = cal_start + timedelta(minutes=MASSAGE_SESSION_MIN)
+                self._book("massage", best_key, cal_start, cal_end, name)
+                model_busy.append((cal_start, cal_end))   # block full 15 min for model
+                appointments["massage"] = {
+                    "provider": self.calendars[best_key].name,
+                    "start": cal_start,
+                    "end": session_end,   # display only the 10-min session
+                }
+
         # ── 1. Hair (anytime, independent of makeup) ───────────────────────────
         hair_end = day_start
-        warnings: list[str] = []
         if model.get("wants_hair", True):
             assigned_hair = model.get("assigned_hair_stylist", "")
             all_hair = [
@@ -534,16 +612,19 @@ def schedule_to_rows(schedule: list[dict]) -> list[dict]:
         h_s,  h_e,  h_p  = appt("hair")
         m_s,  m_e,  m_p  = appt("makeup")
         p_s,  p_e,  _    = appt("portrait")
+        ms_s, ms_e, ms_p = appt("massage")
 
         rows.append({
-            "Model":         entry["model"],
-            "Group":         entry["group"],
-            "Rehearsal":     entry.get("rehearsal_time", ""),
-            "Hair Stylist":  h_p or entry.get("hair_stylist", ""),
-            "Hair Time":     f"{h_s}–{h_e}" if h_s else "",
-            "Makeup Artist": m_p or entry.get("makeup_artist", ""),
-            "Makeup Time":   f"{m_s}–{m_e}" if m_s else "",
-            "Portrait":      f"{p_s}–{p_e}" if p_s else "",
-            "Warnings":      entry.get("warnings", []),
+            "Model":            entry["model"],
+            "Group":            entry["group"],
+            "Rehearsal":        entry.get("rehearsal_time", ""),
+            "Massage Provider": ms_p,
+            "Massage Time":     f"{ms_s}–{ms_e}" if ms_s else "",
+            "Hair Stylist":     h_p or entry.get("hair_stylist", ""),
+            "Hair Time":        f"{h_s}–{h_e}" if h_s else "",
+            "Makeup Artist":    m_p or entry.get("makeup_artist", ""),
+            "Makeup Time":      f"{m_s}–{m_e}" if m_s else "",
+            "Portrait":         f"{p_s}–{p_e}" if p_s else "",
+            "Warnings":         entry.get("warnings", []),
         })
     return rows

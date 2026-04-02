@@ -14,6 +14,20 @@
         <input type="number" name="num_portrait_slots" min="1" max="5" value="{{ config.num_portrait_slots }}">
       </div>
     </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Massage Tables</label>
+        <input type="number" name="num_massage_tables" min="0" max="10" value="{{ config.num_massage_tables or 1 }}">
+        <p style="font-size:0.72rem;color:#888;margin-top:4px;">Set to 0 to disable massage scheduling</p>
+      </div>
+      <div class="form-group">
+        <label>Massage Provider Name(s) <span style="color:#888">(optional)</span></label>
+        <input type="text" name="massage_provider_names"
+               value="{{ (config.massage_provider_names or []) | join(', ') }}"
+               placeholder="e.g. Jessica, Table 2">
+        <p style="font-size:0.72rem;color:#888;margin-top:4px;">Comma-separated. Defaults to "Massage Table 1", "Massage Table 2", …</p>
+      </div>
+    </div>
 
     <hr style="margin: 20px 0; border-color: #e5e5e7;">
     <h3 style="margin-bottom:16px;font-size:0.95rem;">Service Durations (minutes)</h3>

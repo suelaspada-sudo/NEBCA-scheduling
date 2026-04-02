@@ -4,11 +4,9 @@
 <div class="step-flow">
   <div class="step {{ 'step-done' if state.models else 'step-todo' }}">① Upload CSVs</div>
   <span class="step-arrow">→</span>
-  <div class="step {{ 'step-done' if state.match_report else 'step-todo' }}">② Match Artists</div>
+  <div class="step {{ 'step-done' if state.schedule else 'step-todo' }}">② Generate Schedule</div>
   <span class="step-arrow">→</span>
-  <div class="step {{ 'step-done' if state.schedule else 'step-todo' }}">③ Generate Schedule</div>
-  <span class="step-arrow">→</span>
-  <div class="step {{ 'step-done' if state.schedule else 'step-todo' }}">④ Export</div>
+  <div class="step {{ 'step-done' if state.schedule else 'step-todo' }}">③ Export</div>
 </div>
 
 <!-- Stats -->
@@ -18,44 +16,45 @@
     <div class="stat-box"><div class="num">{{ state.models|length }}</div><div class="label">Models Loaded</div></div>
     <div class="stat-box"><div class="num">{{ state.artists|length }}</div><div class="label">Glam Artists</div></div>
     <div class="stat-box"><div class="num">{{ state.schedule|length }}</div><div class="label">Scheduled</div></div>
-    <div class="stat-box">
-      <div class="num">
-        {% set matched = state.models | selectattr("assigned_hair_stylist") | list | length %}
-        {{ matched }}
-      </div>
-      <div class="label">Hair Matched</div>
-    </div>
+    <div class="stat-box"><div class="num">{{ state.contacts|length }}</div><div class="label">Contacts Loaded</div></div>
   </div>
 </div>
 {% endif %}
 
 <!-- Step 1: Upload -->
 <div class="card">
-  <h2>Step 1 — Upload Your Three Google Sheets (as CSV)</h2>
+  <h2>Step 1 — Upload Your Google Sheets (as CSV)</h2>
   <p style="font-size:0.85rem;color:#555;margin-bottom:16px;">
-    In each Google Sheet: <strong>File → Download → CSV</strong>
+    In each Google Sheet: <strong>File → Download → Comma-separated values (.csv)</strong>
   </p>
 
   <form method="POST" action="/upload" enctype="multipart/form-data">
     <div class="form-row">
       <div class="form-group">
-        <label>Models Master Schedule</label>
+        <label>2026 Models Master Schedule <span style="color:#c00">*</span></label>
         <input type="file" name="models_master" accept=".csv">
         <p style="font-size:0.72rem;color:#888;margin-top:4px;">
-          Glams Master sheet — model names, groups, current glam assignments
+          Model names, groups, and glam assignments (Hair Stylist Name / Makeup Artist Name columns)
         </p>
       </div>
       <div class="form-group">
-        <label>2026 Glam Info</label>
+        <label>2026 Glam Info <span style="color:#888">(optional)</span></label>
         <input type="file" name="glam_info" accept=".csv">
         <p style="font-size:0.72rem;color:#888;margin-top:4px;">
-          Hair stylists + makeup artists, preferences, capacity
+          Hair stylists + makeup artists — used for capacity limits and unassigned models
         </p>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Model Questionnaire Responses</label>
+        <label>Contact Info <span style="color:#888">(optional)</span></label>
+        <input type="file" name="contact_info" accept=".csv">
+        <p style="font-size:0.72rem;color:#888;margin-top:4px;">
+          CSV with Name, Email, Phone columns — used in the Wix export
+        </p>
+      </div>
+      <div class="form-group">
+        <label>Model Questionnaire Responses <span style="color:#888">(optional)</span></label>
         <input type="file" name="questionnaire" accept=".csv">
         <p style="font-size:0.72rem;color:#888;margin-top:4px;">
           R4H 2026 Glam Matching form responses
@@ -66,29 +65,13 @@
   </form>
 </div>
 
-<!-- Step 2: Match -->
+<!-- Step 2: Schedule -->
 <div class="card">
-  <h2>Step 2 — Match Models to Glam Artists</h2>
+  <h2>Step 2 — Generate Schedule</h2>
   <p style="font-size:0.85rem;color:#555;margin-bottom:16px;">
-    Automatically pairs each model with a compatible hair stylist and makeup artist
-    based on style keywords, artist preferences, and capacity.
-  </p>
-  <form method="POST" action="/match">
-    <button type="submit" class="btn btn-primary" {{ 'disabled' if not state.models }}>
-      Run Style Matching
-    </button>
-    {% if state.match_report %}
-      <a href="/matches" class="btn btn-secondary" style="margin-left:8px;">View Matches →</a>
-    {% endif %}
-  </form>
-</div>
-
-<!-- Step 3: Schedule -->
-<div class="card">
-  <h2>Step 3 — Generate Schedule</h2>
-  <p style="font-size:0.85rem;color:#555;margin-bottom:16px;">
-    Auto-assigns all service appointments respecting all timing constraints and rehearsal blackouts.
-    <a href="/configure" style="color:#0071e3;">Configure providers & durations →</a>
+    Assigns all appointments using the artist names from the models master sheet,
+    respecting rehearsal blackouts and service windows.
+    <a href="/configure" style="color:#0071e3;">Configure providers &amp; durations →</a>
   </p>
   <form method="POST" action="/schedule">
     <button type="submit" class="btn btn-primary" {{ 'disabled' if not state.models }}>
@@ -100,16 +83,16 @@
   </form>
 </div>
 
-<!-- Step 4: Export -->
+<!-- Step 3: Export -->
 {% if state.schedule %}
 <div class="card">
-  <h2>Step 4 — Export</h2>
+  <h2>Step 3 — Export</h2>
   <div style="display:flex;gap:12px;flex-wrap:wrap;">
     <a href="/export/wix" class="btn btn-success">⬇ Download Wix CSV</a>
     <a href="/export/master" class="btn btn-secondary">⬇ Download Master Schedule CSV</a>
   </div>
   <p style="font-size:0.75rem;color:#888;margin-top:12px;">
-    Wix CSV: import into Wix Bookings (one row per appointment). &nbsp;
+    Wix CSV: one row per appointment, includes email &amp; phone. &nbsp;
     Master CSV: one row per model with all services listed.
   </p>
 </div>

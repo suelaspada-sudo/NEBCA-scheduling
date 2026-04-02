@@ -27,6 +27,7 @@ WIX_FIELDNAMES = [
 ]
 
 SERVICE_DISPLAY = {
+    "massage": "Massage",
     "hair": "Hair Styling",
     "makeup": "Makeup",
     "portrait": "Portrait Session",
@@ -45,13 +46,16 @@ def schedule_to_wix_csv(
     schedule: list[dict],
     models_by_name: dict,
     event_date: str = "2026-01-01",
+    contacts: dict | None = None,
     output_path: str | None = None,
 ) -> str:
     """
     Convert schedule to Wix Bookings CSV string.
+    contacts: optional {lowercase_name: {email, phone}} from contact info CSV.
     If output_path provided, also writes to file.
     Returns CSV string.
     """
+    contacts = contacts or {}
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=WIX_FIELDNAMES)
     writer.writeheader()
@@ -59,8 +63,10 @@ def schedule_to_wix_csv(
     for entry in schedule:
         model_name = entry["model"]
         model_info = models_by_name.get(model_name, {})
-        client_email = model_info.get("email", "")
-        client_phone = model_info.get("phone", "")
+        # Contact info CSV takes priority over models master sheet columns
+        contact = contacts.get(model_name.lower(), {})
+        client_email = contact.get("email") or model_info.get("email", "")
+        client_phone = contact.get("phone") or model_info.get("phone", "")
 
         for service_key, display_name in SERVICE_DISPLAY.items():
             appt = entry.get("appointments", {}).get(service_key)
