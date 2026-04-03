@@ -65,7 +65,7 @@ def _make_dt(date_str: str, h: int, m: int) -> datetime:
 
 
 def _parse_time_slot(ts: str, event_date: str) -> datetime | None:
-    """Parse a time string like '2:00 PM', '2:00PM', '14:00' → datetime on event_date, or None."""
+    """Parse a start-only time string like '2:00 PM' → datetime, or None."""
     if not ts:
         return None
     ts = ts.strip()
@@ -75,6 +75,34 @@ def _parse_time_slot(ts: str, event_date: str) -> datetime | None:
             return _make_dt(event_date, t.hour, t.minute)
         except ValueError:
             continue
+    return None
+
+
+def _parse_time_range(ts: str, event_date: str) -> tuple[datetime, datetime] | None:
+    """
+    Parse a time slot string into (start, end).
+    Handles ranges like '11:00 AM - 11:45 AM', '11:00 AM–11:45 AM', or '11:00-11:45'.
+    If only a start time is given, end = start + DURATIONS default (45 min).
+    Returns None if unparseable.
+    """
+    if not ts:
+        return None
+    ts = ts.strip()
+
+    # Try to split on common range separators: " - ", "–", "-" (with optional spaces)
+    for sep in (" - ", " – ", "–", " -", "- "):
+        if sep in ts:
+            parts = ts.split(sep, 1)
+            start_dt = _parse_time_slot(parts[0].strip(), event_date)
+            end_dt   = _parse_time_slot(parts[1].strip(), event_date)
+            if start_dt and end_dt:
+                return start_dt, end_dt
+            break
+
+    # Single time — use default duration
+    start_dt = _parse_time_slot(ts, event_date)
+    if start_dt:
+        return start_dt, start_dt + timedelta(minutes=DURATIONS["hair"])
     return None
 
 
@@ -139,8 +167,6 @@ class Scheduler:
         num_massage_tables: int = 1,
         massage_provider_names: list[str] | None = None,
         event_date: str = "2026-01-01",
-        hair_duration_min: int = 45,
-        makeup_duration_min: int = 45,
         **kwargs,
     ):
         global WINDOWS, REHEARSAL_BLACKOUTS
@@ -156,11 +182,6 @@ class Scheduler:
 
         self.models = copy.deepcopy(models)
         self.artists = {a["name"]: a for a in artists}
-        self.hair_duration = hair_duration_min
-        self.makeup_duration = makeup_duration_min
-
-        DURATIONS["hair"] = hair_duration_min
-        DURATIONS["makeup"] = makeup_duration_min
 
         # ── Build provider calendars ──────────────────────────────────────────
 
@@ -465,17 +486,16 @@ class Scheduler:
                 print(msg)
                 warnings.append(msg[7:])
             else:
-                hair_slot_dt = _parse_time_slot(model.get("hair_time_slot", ""), self._event_date)
-                if hair_slot_dt:
-                    # Sheet has an exact time — book it directly, no sliding
-                    start = hair_slot_dt
-                    end = start + timedelta(minutes=DURATIONS["hair"])
+                hair_range = _parse_time_range(model.get("hair_time_slot", ""), self._event_date)
+                if hair_range:
+                    # Sheet has a time — book it directly, no sliding
+                    start, end = hair_range
                     self._book("hair", hair_cal_key, start, end, name)
                     model_busy.append((start, end))
                     appointments["hair"] = {"provider": hair_cal_key[len("hair::"):], "start": start, "end": end}
                     hair_end = end
                 else:
-                    # No time slot — fall back to search algorithm
+                    # No time slot — fall back to search algorithm with default duration
                     hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
                     best_slot = None
                     for search_start in hair_search_starts:
@@ -506,18 +526,20 @@ class Scheduler:
                 warnings.append(msg[7:])
             else:
                 mu_slot_dt = _parse_time_slot(model.get("makeup_time_slot", ""), self._event_date)
+                mu_range = _parse_time_range(model.get("makeup_time_slot", ""), self._event_date)
                 if same_artist and hair_end > day_start:
                     # Same artist — makeup starts immediately after hair, no gap
+                    # Duration: use makeup range length if given, else default
+                    mu_dur = (mu_range[1] - mu_range[0]) if mu_range else timedelta(minutes=DURATIONS["makeup"])
                     start = hair_end
-                    end = start + timedelta(minutes=DURATIONS["makeup"])
+                    end = start + mu_dur
                     self._book("makeup", mu_cal_key, start, end, name)
                     model_busy.append((start, end))
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
-                elif mu_slot_dt:
-                    # Sheet has an exact time — book it directly, no sliding
-                    start = mu_slot_dt
-                    end = start + timedelta(minutes=DURATIONS["makeup"])
+                elif mu_range:
+                    # Sheet has a time — book it directly, no sliding
+                    start, end = mu_range
                     self._book("makeup", mu_cal_key, start, end, name)
                     model_busy.append((start, end))
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}

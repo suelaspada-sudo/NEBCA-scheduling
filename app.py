@@ -95,8 +95,6 @@ def configure():
             "num_portrait_slots": int(request.form.get("num_portrait_slots", 1)),
             "num_massage_tables": int(request.form.get("num_massage_tables", 1)),
             "massage_provider_names": massage_names,
-            "hair_duration": int(request.form.get("hair_duration", 45)),
-            "makeup_duration": int(request.form.get("makeup_duration", 45)),
         }
         # Save config to file so it persists
         with open("data/config.json", "w") as f:
@@ -119,8 +117,6 @@ def _load_config() -> dict:
         "num_portrait_slots": 1,
         "num_massage_tables": 1,
         "massage_provider_names": [],
-        "hair_duration": 45,
-        "makeup_duration": 45,
     }
 
 
@@ -141,8 +137,6 @@ def run_schedule():
         num_massage_tables=config.get("num_massage_tables", 1),
         massage_provider_names=config.get("massage_provider_names") or None,
         event_date=config["event_date"],
-        hair_duration_min=config["hair_duration"],
-        makeup_duration_min=config["makeup_duration"],
     )
 
     STATE["schedule"] = scheduler.run()
