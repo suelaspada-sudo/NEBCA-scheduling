@@ -373,42 +373,38 @@ class Scheduler:
             else None
         )
 
-        # Search within normal window first, then force-fit outside it so no model is skipped.
-        # _FORCE_END is a hard ceiling well beyond the event to catch overflow appointments.
-        _FORCE_END = _make_dt(self._event_date, 23, 59)
+        start = max(earliest, win_start)
 
-        for search_end in (win_end, _FORCE_END):
-            start = max(earliest, win_start)
-            while start + dur <= search_end:
-                end = start + dur
+        while start + dur <= win_end:
+            end = start + dur
 
-                # Jump past blackout if needed
-                if _in_blackout(start, end, group_key):
-                    start = REHEARSAL_BLACKOUTS[group_key][1]
-                    continue
+            # Jump past blackout if needed
+            if _in_blackout(start, end, group_key):
+                start = REHEARSAL_BLACKOUTS[group_key][1]
+                continue
 
-                # Check provider availability (include sibling calendar for "both" artists)
-                all_provider_slots = cal.slots + (sibling_cal.slots if sibling_cal else [])
-                provider_conflict = None
-                for s, e, _ in sorted(all_provider_slots, key=lambda x: x[0]):
-                    if _overlaps(start, end, s, e):
-                        provider_conflict = e
-                        break
-                if provider_conflict is not None:
-                    start = provider_conflict
-                    continue
+            # Check provider availability (include sibling calendar for "both" artists)
+            all_provider_slots = cal.slots + (sibling_cal.slots if sibling_cal else [])
+            provider_conflict = None
+            for s, e, _ in sorted(all_provider_slots, key=lambda x: x[0]):
+                if _overlaps(start, end, s, e):
+                    provider_conflict = e
+                    break
+            if provider_conflict is not None:
+                start = provider_conflict
+                continue
 
-                # Check model's own schedule (no personal overlaps)
-                model_conflict = None
-                for ms, me in sorted(model_busy):
-                    if _overlaps(start, end, ms, me):
-                        model_conflict = me
-                        break
-                if model_conflict is not None:
-                    start = model_conflict
-                    continue
+            # Check model's own schedule (no personal overlaps)
+            model_conflict = None
+            for ms, me in sorted(model_busy):
+                if _overlaps(start, end, ms, me):
+                    model_conflict = me
+                    break
+            if model_conflict is not None:
+                start = model_conflict
+                continue
 
-                return start, end
+            return start, end
 
         return None
 
@@ -425,26 +421,7 @@ class Scheduler:
 
         # Scheduling hint from Notes field ("later" / "earlier")
         scheduling_hint = model.get("scheduling_hint", "")
-
-        # Stagger: alternate odd-indexed models to prefer afternoon slots so that
-        # models are spread across morning AND afternoon rather than everyone piling
-        # into the first available slot at 11:00 AM.
-        # Odd models start their search from after the rehearsal blackout ends
-        # (2:30 PM for group2/hope_ambassador, 4:00 PM for group1).
-        # If no afternoon slot is found we always fall back to the morning search.
-        blackout_end = (
-            REHEARSAL_BLACKOUTS[group_key][1]
-            if group_key and REHEARSAL_BLACKOUTS.get(group_key)
-            else day_start
-        )
-        # "later" hint overrides stagger to always prefer afternoon
-        # "earlier" hint overrides stagger to always prefer morning
-        if scheduling_hint == "later":
-            prefer_afternoon = True
-        elif scheduling_hint == "earlier":
-            prefer_afternoon = False
-        else:
-            prefer_afternoon = (stagger_idx % 2 == 1) and (blackout_end > day_start)
+        prefer_afternoon = (scheduling_hint == "later")
 
         # ── 0. Massage (9 AM – 5 PM, independent of glam) ─────────────────────
         # Only scheduled when the services CSV marks Chair Massage = Y.
@@ -490,8 +467,9 @@ class Scheduler:
                 warnings.append(msg[7:])
             else:
                 hair_dur = _parse_duration_min(model.get("hair_time_slot", ""))
-                # Always include day_start as final fallback so no slot is missed
-                hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start, blackout_end]
+                # "later" note → try afternoon first, then fall back to morning
+                # Everyone else → fill from 11am in order, no gaps
+                hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
                 best_slot = None
                 for search_start in hair_search_starts:
                     best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur)
@@ -530,7 +508,7 @@ class Scheduler:
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
                 else:
-                    makeup_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start, blackout_end]
+                    makeup_search_starts = [WINDOWS["makeup"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
                     best_slot = None
                     for search_start in makeup_search_starts:
                         best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy, duration_min=mu_dur)
