@@ -459,31 +459,35 @@ class Scheduler:
         hair_cal_key = None
         assigned_hair = model.get("assigned_hair_stylist", "").strip()
         if assigned_hair:
-            # Use time slot from sheet as preferred start time if provided
-            hair_slot_dt = _parse_time_slot(model.get("hair_time_slot", ""), self._event_date)
-            if hair_slot_dt:
-                hair_search_starts = [hair_slot_dt, day_start] if prefer_afternoon else [hair_slot_dt]
-            elif prefer_afternoon:
-                hair_search_starts = [blackout_end, day_start]
-            else:
-                hair_search_starts = [day_start]
             hair_cal_key = self._resolve_calendar_key("hair", assigned_hair)
             if not hair_cal_key:
                 msg = f"[WARN] {name}: hair artist '{assigned_hair}' not found."
                 print(msg)
                 warnings.append(msg[7:])
             else:
-                best_slot = None
-                for search_start in hair_search_starts:
-                    best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy)
-                    if best_slot:
-                        break
-                if best_slot:
-                    start, end = best_slot
+                hair_slot_dt = _parse_time_slot(model.get("hair_time_slot", ""), self._event_date)
+                if hair_slot_dt:
+                    # Sheet has an exact time — book it directly, no sliding
+                    start = hair_slot_dt
+                    end = start + timedelta(minutes=DURATIONS["hair"])
                     self._book("hair", hair_cal_key, start, end, name)
                     model_busy.append((start, end))
                     appointments["hair"] = {"provider": hair_cal_key[len("hair::"):], "start": start, "end": end}
                     hair_end = end
+                else:
+                    # No time slot — fall back to search algorithm
+                    hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
+                    best_slot = None
+                    for search_start in hair_search_starts:
+                        best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy)
+                        if best_slot:
+                            break
+                    if best_slot:
+                        start, end = best_slot
+                        self._book("hair", hair_cal_key, start, end, name)
+                        model_busy.append((start, end))
+                        appointments["hair"] = {"provider": hair_cal_key[len("hair::"):], "start": start, "end": end}
+                        hair_end = end
 
         # ── 3. Makeup ──────────────────────────────────────────────────────────
         # Only schedule if the sheet has an assigned artist — blank = no makeup.
@@ -491,40 +495,47 @@ class Scheduler:
         assigned_mu = model.get("assigned_makeup_artist", "").strip()
         if assigned_mu:
             mu_cal_key = self._resolve_calendar_key("makeup", assigned_mu)
-            # If same artist does hair AND makeup, schedule makeup right after hair
+            # Detect same artist for both hair and makeup → back-to-back
             hair_artist = hair_cal_key.split("::")[1] if hair_cal_key else ""
             mu_artist = mu_cal_key.split("::")[1] if mu_cal_key else ""
             same_artist = bool(hair_artist and mu_artist and hair_artist == mu_artist)
-
-            if same_artist and hair_end > day_start:
-                # Back-to-back: makeup starts immediately after hair
-                makeup_search_starts = [hair_end]
-            else:
-                # Use time slot from sheet as preferred start time if provided
-                mu_slot_dt = _parse_time_slot(model.get("makeup_time_slot", ""), self._event_date)
-                if mu_slot_dt:
-                    makeup_search_starts = [mu_slot_dt, day_start] if prefer_afternoon else [mu_slot_dt]
-                elif prefer_afternoon:
-                    makeup_search_starts = [blackout_end, day_start]
-                else:
-                    makeup_search_starts = [day_start]
 
             if not mu_cal_key:
                 msg = f"[WARN] {name}: makeup artist '{assigned_mu}' not found."
                 print(msg)
                 warnings.append(msg[7:])
             else:
-                best_slot = None
-                for search_start in makeup_search_starts:
-                    best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy)
-                    if best_slot:
-                        break
-                if best_slot:
-                    start, end = best_slot
+                mu_slot_dt = _parse_time_slot(model.get("makeup_time_slot", ""), self._event_date)
+                if same_artist and hair_end > day_start:
+                    # Same artist — makeup starts immediately after hair, no gap
+                    start = hair_end
+                    end = start + timedelta(minutes=DURATIONS["makeup"])
                     self._book("makeup", mu_cal_key, start, end, name)
                     model_busy.append((start, end))
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
+                elif mu_slot_dt:
+                    # Sheet has an exact time — book it directly, no sliding
+                    start = mu_slot_dt
+                    end = start + timedelta(minutes=DURATIONS["makeup"])
+                    self._book("makeup", mu_cal_key, start, end, name)
+                    model_busy.append((start, end))
+                    appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
+                    makeup_end = end
+                else:
+                    # No time slot — fall back to search algorithm
+                    makeup_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
+                    best_slot = None
+                    for search_start in makeup_search_starts:
+                        best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy)
+                        if best_slot:
+                            break
+                    if best_slot:
+                        start, end = best_slot
+                        self._book("makeup", mu_cal_key, start, end, name)
+                        model_busy.append((start, end))
+                        appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
+                        makeup_end = end
 
         # ── 4. Portrait (after hair + makeup, within portrait window) ──────────
         glam_done = max(hair_end, makeup_end)
