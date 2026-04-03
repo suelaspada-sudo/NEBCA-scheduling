@@ -538,17 +538,18 @@ class Scheduler:
                         appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                         makeup_end = end
 
-        # ── 4. Portrait (after hair + makeup, within portrait window) ──────────
-        glam_done = max(hair_end, makeup_end)
-        portrait_earliest = max(glam_done, WINDOWS["portrait"][0])
-        for pk in sorted(k for k in self.calendars if k.startswith("portrait::")):
-            slot = self._find_slot("portrait", pk, portrait_earliest, group_key, model_busy)
-            if slot:
-                start, end = slot
-                self._book("portrait", pk, start, end, name)
-                model_busy.append((start, end))
-                appointments["portrait"] = {"provider": self.calendars[pk].name, "start": start, "end": end}
-                break
+        # ── 4. Portrait (Models and HAs only — board members excluded) ───────────
+        if group_key != "board_member":
+            glam_done = max(hair_end, makeup_end)
+            portrait_earliest = max(glam_done, WINDOWS["portrait"][0])
+            for pk in sorted(k for k in self.calendars if k.startswith("portrait::")):
+                slot = self._find_slot("portrait", pk, portrait_earliest, group_key, model_busy)
+                if slot:
+                    start, end = slot
+                    self._book("portrait", pk, start, end, name)
+                    model_busy.append((start, end))
+                    appointments["portrait"] = {"provider": self.calendars[pk].name, "start": start, "end": end}
+                    break
 
         # Show rehearsal time from the sheet if present; otherwise derive from blackout
         rehearsal_display = model.get("rehearsal_time", "")
