@@ -538,12 +538,17 @@ class Scheduler:
                         appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                         makeup_end = end
 
-        # ── 4. Portrait (Models and HAs only — board members excluded) ───────────
+        # ── 4. Portrait (Models and HAs only — board members and specific names excluded) ──
+        _PORTRAIT_EXCLUDE = {
+            "michelle gaghan", "amber-jean nickel", "cassia leach",
+            "kerry hekl", "michelle neas",
+        }
         _type_lower = model.get("type", "").lower().strip()
         _is_board = (group_key == "board_member") or any(
             t in _type_lower for t in ("board", "bad")
         )
-        if not _is_board:
+        _excluded = _is_board or name.lower().strip() in _PORTRAIT_EXCLUDE
+        if not _excluded:
             glam_done = max(hair_end, makeup_end)
             portrait_earliest = max(glam_done, WINDOWS["portrait"][0])
             for pk in sorted(k for k in self.calendars if k.startswith("portrait::")):
