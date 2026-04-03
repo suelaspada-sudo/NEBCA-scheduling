@@ -373,38 +373,42 @@ class Scheduler:
             else None
         )
 
-        start = max(earliest, win_start)
+        # Search within normal window first, then force-fit outside it so no model is skipped.
+        # _FORCE_END is a hard ceiling well beyond the event to catch overflow appointments.
+        _FORCE_END = _make_dt(self._event_date, 23, 59)
 
-        while start + dur <= win_end:
-            end = start + dur
+        for search_end in (win_end, _FORCE_END):
+            start = max(earliest, win_start)
+            while start + dur <= search_end:
+                end = start + dur
 
-            # Jump past blackout if needed
-            if _in_blackout(start, end, group_key):
-                start = REHEARSAL_BLACKOUTS[group_key][1]
-                continue
+                # Jump past blackout if needed
+                if _in_blackout(start, end, group_key):
+                    start = REHEARSAL_BLACKOUTS[group_key][1]
+                    continue
 
-            # Check provider availability (include sibling calendar for "both" artists)
-            all_provider_slots = cal.slots + (sibling_cal.slots if sibling_cal else [])
-            provider_conflict = None
-            for s, e, _ in sorted(all_provider_slots, key=lambda x: x[0]):
-                if _overlaps(start, end, s, e):
-                    provider_conflict = e
-                    break
-            if provider_conflict is not None:
-                start = provider_conflict
-                continue
+                # Check provider availability (include sibling calendar for "both" artists)
+                all_provider_slots = cal.slots + (sibling_cal.slots if sibling_cal else [])
+                provider_conflict = None
+                for s, e, _ in sorted(all_provider_slots, key=lambda x: x[0]):
+                    if _overlaps(start, end, s, e):
+                        provider_conflict = e
+                        break
+                if provider_conflict is not None:
+                    start = provider_conflict
+                    continue
 
-            # Check model's own schedule (no personal overlaps)
-            model_conflict = None
-            for ms, me in sorted(model_busy):
-                if _overlaps(start, end, ms, me):
-                    model_conflict = me
-                    break
-            if model_conflict is not None:
-                start = model_conflict
-                continue
+                # Check model's own schedule (no personal overlaps)
+                model_conflict = None
+                for ms, me in sorted(model_busy):
+                    if _overlaps(start, end, ms, me):
+                        model_conflict = me
+                        break
+                if model_conflict is not None:
+                    start = model_conflict
+                    continue
 
-            return start, end
+                return start, end
 
         return None
 
