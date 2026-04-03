@@ -81,26 +81,22 @@ def _parse_time_slot(ts: str, event_date: str) -> datetime | None:
 
 def _parse_duration_min(ts: str) -> int | None:
     """
-    Parse a duration string from the Time Slot column into minutes.
-    Handles: '30 mins', '60 min', '45 minutes', '1 hr', '1.5 hrs', '1 hour', '90'
-    Returns None if the string cannot be parsed as a duration.
+    Extract exact minutes from the Time Slot column value.
+    Hours (e.g. '1 hr', '1.5 hours') are converted to minutes.
+    Any other value: grab the first integer and use it as minutes exactly.
+    Returns None if no number found.
     """
     if not ts:
         return None
     ts = ts.strip().lower()
 
-    # Hours pattern: "1 hr", "1.5 hrs", "2 hours", "2 hour"
-    m = re.match(r'^(\d+(?:\.\d+)?)\s*ho?u?r', ts)
+    # Hours: "1 hr", "1.5 hrs", "2 hours", "1 hour"
+    m = re.search(r'(\d+(?:\.\d+)?)\s*h(?:ou?r?)?s?', ts)
     if m:
         return int(float(m.group(1)) * 60)
 
-    # Minutes pattern: "30 min", "45 mins", "60 minutes", "30m"
-    m = re.match(r'^(\d+)\s*m', ts)
-    if m:
-        return int(m.group(1))
-
-    # Bare number — assume minutes
-    m = re.match(r'^(\d+)$', ts)
+    # Any integer → exact minutes
+    m = re.search(r'(\d+)', ts)
     if m:
         return int(m.group(1))
 
