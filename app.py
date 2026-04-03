@@ -14,8 +14,7 @@ import io
 import pandas as pd
 
 from src.parser import (
-    parse_models_master, parse_glam_info, parse_questionnaire,
-    merge_model_data, parse_contact_info, parse_services, merge_services,
+    parse_models_master, parse_contact_info, parse_services, merge_services,
 )
 from src.scheduler import Scheduler, schedule_to_rows
 from src.exporter import schedule_to_wix_csv, schedule_to_master_csv
@@ -48,7 +47,7 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    file_keys = ["models_master", "glam_info", "questionnaire", "contact_info", "services"]
+    file_keys = ["models_master", "contact_info", "services"]
     saved = {}
     for key in file_keys:
         f = request.files.get(key)
@@ -61,12 +60,6 @@ def upload():
     try:
         if "models_master" in saved:
             STATE["models"] = parse_models_master(saved["models_master"])
-        if "glam_info" in saved:
-            STATE["artists"] = parse_glam_info(saved["glam_info"])
-        if "questionnaire" in saved:
-            responses = parse_questionnaire(saved["questionnaire"])
-            if STATE["models"]:
-                STATE["models"] = merge_model_data(STATE["models"], responses)
         if "contact_info" in saved:
             STATE["contacts"] = parse_contact_info(saved["contact_info"])
         if "services" in saved:

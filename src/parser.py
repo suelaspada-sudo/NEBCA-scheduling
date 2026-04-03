@@ -100,8 +100,8 @@ def _safe_str(val) -> str:
 # ─── Models Master ────────────────────────────────────────────────────────────
 
 GROUP_ROW_PATTERNS = [
-    ("group1",           ["group 1", "group1", "runway part 1", "runway part1"]),
-    ("group2",           ["group 2", "group2", "runway part 2", "runway part2"]),
+    ("group1",           ["group 1", "group1", "runway part 1", "runway part1", "act 1", "act1"]),
+    ("group2",           ["group 2", "group2", "runway part 2", "runway part2", "act 2", "act2"]),
     ("hope_ambassador",  ["hope ambassador", "hope ambassadors", "hope amb"]),
     ("board_member",     ["board member", "board members", "bad", "bad members"]),
 ]
@@ -218,9 +218,22 @@ def parse_models_master(path: str | Path) -> list[dict]:
         # Strip group suffixes from name (e.g. "Cassia Leach board member")
         name, suffix_group = _strip_name_suffix(name)
 
-        # Use explicit Group column if present, then suffix, then tracked group
-        group_col = _safe_str(row.get("Group", ""))
-        group = group_col if group_col else (suffix_group or current_group)
+        # Use explicit Act or Group column if present, then suffix, then tracked group
+        act_raw = _safe_str(row.get("Act", "") or row.get("Group", ""))
+        if act_raw:
+            act_lower = act_raw.lower().strip()
+            if act_lower in ("1", "act 1", "act1", "group 1", "group1"):
+                group = "group1"
+            elif act_lower in ("2", "act 2", "act2", "group 2", "group2"):
+                group = "group2"
+            elif act_lower in ("hope ambassador", "hope ambassadors", "hope amb", "ha"):
+                group = "hope_ambassador"
+            elif act_lower in ("board member", "board members", "bad", "bad member", "bad members"):
+                group = "board_member"
+            else:
+                group = act_raw
+        else:
+            group = suffix_group or current_group
 
         # Hair/Makeup columns in master sheet indicate if they want the service
         hair_val = _safe_str(row.get("Hair", "")).lower()
@@ -228,14 +241,25 @@ def parse_models_master(path: str | Path) -> list[dict]:
         wants_hair = not (hair_val in ("no", "maybe") or hair_val.startswith("no") or hair_val.startswith("maybe"))
         wants_makeup = not (makeup_val in ("no", "maybe") or makeup_val.startswith("no") or makeup_val.startswith("maybe"))
 
+        # Parse Notes for scheduling hint ("later" → prefer afternoon, "earlier" → prefer morning)
+        notes = _safe_str(row.get("Notes", ""))
+        notes_lower = notes.lower()
+        if "later" in notes_lower:
+            scheduling_hint = "later"
+        elif "earlier" in notes_lower:
+            scheduling_hint = "earlier"
+        else:
+            scheduling_hint = ""
+
         model = {
             "name": name,
+            "type": _safe_str(row.get("Type", "")),
             "email": _safe_str(row.get("E-mail", "")),
             "phone": _safe_str(row.get("Phone #", "")),
             "group": group,
             "rehearsal_time": current_rehearsal,
             "order": _safe_str(row.get("Order", row.get("#", ""))),
-            # wants_hair/wants_makeup from master sheet (questionnaire may override later)
+            # wants_hair/wants_makeup from master sheet
             "wants_hair": wants_hair,
             "wants_makeup": wants_makeup,
             # pre-assigned glam — if filled in, skip matching for this model
@@ -243,8 +267,9 @@ def parse_models_master(path: str | Path) -> list[dict]:
             "assigned_makeup_artist": _safe_str(row.get("Makeup Artist Name", "")),
             "hair_time_slot": _safe_str(row.get("Time Slot", "")),
             "makeup_time_slot": _safe_str(row.get("Time Slot.1", "")),
-            "hair_notes": _safe_str(row.get("Notes", "")),
+            "hair_notes": notes,
             "makeup_notes": _safe_str(row.get("Notes.1", "")),
+            "scheduling_hint": scheduling_hint,
         }
         models.append(model)
     return models

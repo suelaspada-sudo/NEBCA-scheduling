@@ -44,7 +44,9 @@
           <td style="padding:5px 8px 5px 0;white-space:nowrap;color:#555;">
             {{ slot.start.strftime("%-I:%M %p") }}–{{ slot.end.strftime("%-I:%M %p") }}
           </td>
-          <td style="padding:5px 0;">{{ slot.model }}</td>
+          <td style="padding:5px 0;">
+            {{ slot.model }}{% if p.service == "both" %} <span style="color:#888;font-size:0.75rem;">({{ slot.service | title }})</span>{% endif %}
+          </td>
         </tr>
         {% endif %}
       {% endfor %}

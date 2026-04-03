@@ -46,8 +46,8 @@ MASSAGE_SESSION_MIN = 10  # actual displayed appointment length (excludes buffer
 
 # Time-only tuples (hour, minute) — resolved to datetimes in Scheduler.__init__
 _WINDOW_TIMES = {
-    "hair":     ((11, 30), (18, 0)),
-    "makeup":   ((11, 30), (18, 0)),
+    "hair":     ((11, 0), (17, 0)),    # 11 AM – 5 PM
+    "makeup":   ((11, 0), (17, 0)),    # 11 AM – 5 PM
     "portrait": ((13, 30), (18, 0)),
     "massage":  ((9, 0),   (17, 0)),   # 9 AM – 5 PM
 }
@@ -64,9 +64,23 @@ def _make_dt(date_str: str, h: int, m: int) -> datetime:
     return datetime.strptime(f"{date_str} {h:02d}:{m:02d}", "%Y-%m-%d %H:%M")
 
 
+def _parse_time_slot(ts: str, event_date: str) -> datetime | None:
+    """Parse a time string like '2:00 PM', '2:00PM', '14:00' → datetime on event_date, or None."""
+    if not ts:
+        return None
+    ts = ts.strip()
+    for fmt in ("%I:%M %p", "%I:%M%p", "%H:%M"):
+        try:
+            t = datetime.strptime(ts, fmt)
+            return _make_dt(event_date, t.hour, t.minute)
+        except ValueError:
+            continue
+    return None
+
+
 GROUP_LABELS = {
-    "group1":          ["group 1", "group1", "1"],
-    "group2":          ["group 2", "group2", "2"],
+    "group1":          ["group 1", "group1", "1", "act 1", "act1"],
+    "group2":          ["group 2", "group2", "2", "act 2", "act2"],
     "hope_ambassador": ["hope ambassador", "hope ambassadors", "ha", "hope amb"],
     "board_member":    ["board member", "board members", "board", "bad", "bad member", "bad members"],
 }
@@ -205,6 +219,7 @@ class Scheduler:
             timedelta(minutes=30),   # 3:00 – 3:30 PM
         ]
         _glam_base = _make_dt(event_date, 14, 30)  # 2:30 PM
+        _glam_win_end = WINDOWS["hair"][1]          # 5:00 PM
 
         # Portrait: fixed 2:30 PM break
         _portrait_break = _glam_base
@@ -212,7 +227,23 @@ class Scheduler:
         # Massage: break at 12:30 PM (mid-morning, before glam rush)
         _massage_break = _make_dt(event_date, 12, 30)
 
-        # Assign each unique glam artist a staggered break slot
+        # Compute each artist's earliest expected appointment from models' time slots
+        # so that we never book a break BEFORE they have started working.
+        artist_earliest: dict[str, datetime] = {}
+        for model in self.models:
+            h_name = model.get("assigned_hair_stylist", "").strip()
+            m_name = model.get("assigned_makeup_artist", "").strip()
+            h_ts = _parse_time_slot(model.get("hair_time_slot", ""), event_date)
+            m_ts = _parse_time_slot(model.get("makeup_time_slot", ""), event_date)
+            if h_name and h_ts:
+                if h_name not in artist_earliest or h_ts < artist_earliest[h_name]:
+                    artist_earliest[h_name] = h_ts
+            if m_name and m_ts:
+                if m_name not in artist_earliest or m_ts < artist_earliest[m_name]:
+                    artist_earliest[m_name] = m_ts
+
+        # Assign each unique glam artist a staggered break slot,
+        # ensuring the break is not booked before their first appointment.
         glam_names_ordered = sorted(
             set(
                 cal.name
@@ -222,7 +253,17 @@ class Scheduler:
         )
         _name_to_break: dict[str, tuple] = {}
         for i, aname in enumerate(glam_names_ordered):
-            b_start = _glam_base + _glam_break_offsets[i % len(_glam_break_offsets)]
+            staggered = _glam_base + _glam_break_offsets[i % len(_glam_break_offsets)]
+            earliest = artist_earliest.get(aname)
+            if earliest is not None:
+                # Break must not start before the artist's first expected appointment
+                min_break_start = earliest + timedelta(minutes=1)
+                b_start = max(staggered, min_break_start)
+            else:
+                b_start = staggered
+            # Cap so the break fits within the working window
+            max_break_start = _glam_win_end - _break_dur
+            b_start = min(b_start, max_break_start)
             _name_to_break[aname] = (b_start, b_start + _break_dur)
 
         for key, cal in self.calendars.items():
@@ -356,11 +397,14 @@ class Scheduler:
         appointments = {}
         model_busy: list[tuple[datetime, datetime]] = []
 
-        day_start = WINDOWS["hair"][0]  # 11:30 AM
+        day_start = WINDOWS["hair"][0]  # 11:00 AM
+
+        # Scheduling hint from Notes field ("later" / "earlier")
+        scheduling_hint = model.get("scheduling_hint", "")
 
         # Stagger: alternate odd-indexed models to prefer afternoon slots so that
         # models are spread across morning AND afternoon rather than everyone piling
-        # into the first available slot at 11:30 AM.
+        # into the first available slot at 11:00 AM.
         # Odd models start their search from after the rehearsal blackout ends
         # (2:30 PM for group2/hope_ambassador, 4:00 PM for group1).
         # If no afternoon slot is found we always fall back to the morning search.
@@ -369,7 +413,14 @@ class Scheduler:
             if group_key and REHEARSAL_BLACKOUTS.get(group_key)
             else day_start
         )
-        prefer_afternoon = (stagger_idx % 2 == 1) and (blackout_end > day_start)
+        # "later" hint overrides stagger to always prefer afternoon
+        # "earlier" hint overrides stagger to always prefer morning
+        if scheduling_hint == "later":
+            prefer_afternoon = True
+        elif scheduling_hint == "earlier":
+            prefer_afternoon = False
+        else:
+            prefer_afternoon = (stagger_idx % 2 == 1) and (blackout_end > day_start)
 
         # ── 0. Massage (9 AM – 5 PM, independent of glam) ─────────────────────
         # Only scheduled when the services CSV marks Chair Massage = Y.
@@ -405,9 +456,17 @@ class Scheduler:
         # ── 1. Hair ────────────────────────────────────────────────────────────
         # Only schedule if the sheet has an assigned stylist — blank = no hair.
         hair_end = day_start
+        hair_cal_key = None
         assigned_hair = model.get("assigned_hair_stylist", "").strip()
         if assigned_hair:
-            hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
+            # Use time slot from sheet as preferred start time if provided
+            hair_slot_dt = _parse_time_slot(model.get("hair_time_slot", ""), self._event_date)
+            if hair_slot_dt:
+                hair_search_starts = [hair_slot_dt, day_start] if prefer_afternoon else [hair_slot_dt]
+            elif prefer_afternoon:
+                hair_search_starts = [blackout_end, day_start]
+            else:
+                hair_search_starts = [day_start]
             hair_cal_key = self._resolve_calendar_key("hair", assigned_hair)
             if not hair_cal_key:
                 msg = f"[WARN] {name}: hair artist '{assigned_hair}' not found."
@@ -431,8 +490,25 @@ class Scheduler:
         makeup_end = day_start
         assigned_mu = model.get("assigned_makeup_artist", "").strip()
         if assigned_mu:
-            makeup_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
             mu_cal_key = self._resolve_calendar_key("makeup", assigned_mu)
+            # If same artist does hair AND makeup, schedule makeup right after hair
+            hair_artist = hair_cal_key.split("::")[1] if hair_cal_key else ""
+            mu_artist = mu_cal_key.split("::")[1] if mu_cal_key else ""
+            same_artist = bool(hair_artist and mu_artist and hair_artist == mu_artist)
+
+            if same_artist and hair_end > day_start:
+                # Back-to-back: makeup starts immediately after hair
+                makeup_search_starts = [hair_end]
+            else:
+                # Use time slot from sheet as preferred start time if provided
+                mu_slot_dt = _parse_time_slot(model.get("makeup_time_slot", ""), self._event_date)
+                if mu_slot_dt:
+                    makeup_search_starts = [mu_slot_dt, day_start] if prefer_afternoon else [mu_slot_dt]
+                elif prefer_afternoon:
+                    makeup_search_starts = [blackout_end, day_start]
+                else:
+                    makeup_search_starts = [day_start]
+
             if not mu_cal_key:
                 msg = f"[WARN] {name}: makeup artist '{assigned_mu}' not found."
                 print(msg)
