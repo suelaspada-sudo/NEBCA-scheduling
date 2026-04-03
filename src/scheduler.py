@@ -373,12 +373,12 @@ class Scheduler:
             else None
         )
 
-        # Try normal window first, then expand earlier (8am start) if needed.
-        # Hard cap stays at win_end (5pm hair/makeup, 6pm portrait) — never go later.
         _early_start = _make_dt(self._event_date, 8, 0)
 
-        for search_start in (win_start, _early_start):
-            start = max(earliest, search_start)
+        # Two passes: normal window first, then expanded-early fallback.
+        # On the fallback pass we ignore `earliest` so we genuinely search from 8am.
+        for pass_start in (max(earliest, win_start), _early_start):
+            start = pass_start
             while start + dur <= win_end:
                 end = start + dur
 
@@ -444,12 +444,16 @@ class Scheduler:
                 hair_dur = _parse_duration_min(model.get("hair_time_slot", ""))
                 # "later" note → try afternoon first, then fall back to morning
                 # Everyone else → fill from 11am in order, no gaps
+                # Prefer afternoon if Notes say "later", but always fall back to day_start
                 hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
                 best_slot = None
                 for search_start in hair_search_starts:
                     best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur)
                     if best_slot:
                         break
+                # Final fallback: ignore later/earlier hint and find ANY slot
+                if not best_slot:
+                    best_slot = self._find_slot("hair", hair_cal_key, day_start, group_key, model_busy, duration_min=hair_dur)
                 if best_slot:
                     start, end = best_slot
                     self._book("hair", hair_cal_key, start, end, name)
@@ -489,6 +493,9 @@ class Scheduler:
                         best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy, duration_min=mu_dur)
                         if best_slot:
                             break
+                    # Final fallback: ignore later/earlier hint and find ANY slot
+                    if not best_slot:
+                        best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
                     if best_slot:
                         start, end = best_slot
                         self._book("makeup", mu_cal_key, start, end, name)
