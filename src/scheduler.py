@@ -567,16 +567,8 @@ class Scheduler:
         }
 
     def run(self) -> list[dict]:
-        """Schedule all models. Group 2 / Hope Ambassadors first, board members last."""
-        def priority(model):
-            gk = _group_key(model)
-            if gk in ("group2", "hope_ambassador"):
-                return 0
-            if gk == "board_member":
-                return 2  # schedule last — no rehearsal blackout gives max flexibility
-            return 1  # group1
-
-        for stagger_idx, model in enumerate(sorted(self.models, key=priority)):
+        """Schedule all models in the exact order they appear in the sheet."""
+        for stagger_idx, model in enumerate(self.models):
             self.schedule.append(self._schedule_model(model, stagger_idx=stagger_idx))
 
         return self.schedule
