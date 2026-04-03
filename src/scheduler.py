@@ -373,17 +373,13 @@ class Scheduler:
             else None
         )
 
-        # Try normal window first, then expand in both directions until a slot is found.
-        # This guarantees every model gets a time with their designated artist.
-        _early_start = _make_dt(self._event_date, 8, 0)   # expand as early as 8 AM
-        _late_end    = _make_dt(self._event_date, 21, 0)  # expand as late as 9 PM
+        # Try normal window first, then expand earlier (8am start) if needed.
+        # Hard cap stays at win_end (5pm hair/makeup, 6pm portrait) — never go later.
+        _early_start = _make_dt(self._event_date, 8, 0)
 
-        for search_start, search_end in [
-            (win_start, win_end),          # normal window first
-            (_early_start, _late_end),     # full-day fallback
-        ]:
+        for search_start in (win_start, _early_start):
             start = max(earliest, search_start)
-            while start + dur <= search_end:
+            while start + dur <= win_end:
                 end = start + dur
 
                 # Jump past blackout if needed
