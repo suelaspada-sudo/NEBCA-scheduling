@@ -474,11 +474,11 @@ class Scheduler:
                 }
 
         # ── 1. Hair ────────────────────────────────────────────────────────────
-        # Only schedule if the sheet has an assigned stylist — blank = no hair.
+        # Only schedule if the sheet has an assigned stylist AND Hair != No.
         hair_end = day_start
         hair_cal_key = None
         assigned_hair = model.get("assigned_hair_stylist", "").strip()
-        if assigned_hair:
+        if assigned_hair and model.get("wants_hair", True):
             hair_cal_key = self._resolve_calendar_key("hair", assigned_hair)
             if not hair_cal_key:
                 msg = f"[WARN] {name}: hair artist '{assigned_hair}' not found."
@@ -486,7 +486,8 @@ class Scheduler:
                 warnings.append(msg[7:])
             else:
                 hair_dur = _parse_duration_min(model.get("hair_time_slot", ""))
-                hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
+                # Always include day_start as final fallback so no slot is missed
+                hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start, blackout_end]
                 best_slot = None
                 for search_start in hair_search_starts:
                     best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur)
@@ -500,10 +501,10 @@ class Scheduler:
                     hair_end = end
 
         # ── 3. Makeup ──────────────────────────────────────────────────────────
-        # Only schedule if the sheet has an assigned artist — blank = no makeup.
+        # Only schedule if the sheet has an assigned artist AND Makeup != No.
         makeup_end = day_start
         assigned_mu = model.get("assigned_makeup_artist", "").strip()
-        if assigned_mu:
+        if assigned_mu and model.get("wants_makeup", True):
             mu_cal_key = self._resolve_calendar_key("makeup", assigned_mu)
             # Detect same artist for both hair and makeup → back-to-back
             hair_artist = hair_cal_key.split("::")[1] if hair_cal_key else ""
@@ -525,7 +526,7 @@ class Scheduler:
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
                 else:
-                    makeup_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
+                    makeup_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start, blackout_end]
                     best_slot = None
                     for search_start in makeup_search_starts:
                         best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy, duration_min=mu_dur)
