@@ -32,6 +32,7 @@ Durations (minutes):
 
 from datetime import datetime, timedelta
 import copy
+import re
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -78,31 +79,31 @@ def _parse_time_slot(ts: str, event_date: str) -> datetime | None:
     return None
 
 
-def _parse_time_range(ts: str, event_date: str) -> tuple[datetime, datetime] | None:
+def _parse_duration_min(ts: str) -> int | None:
     """
-    Parse a time slot string into (start, end).
-    Handles ranges like '11:00 AM - 11:45 AM', '11:00 AM–11:45 AM', or '11:00-11:45'.
-    If only a start time is given, end = start + DURATIONS default (45 min).
-    Returns None if unparseable.
+    Parse a duration string from the Time Slot column into minutes.
+    Handles: '30 mins', '60 min', '45 minutes', '1 hr', '1.5 hrs', '1 hour', '90'
+    Returns None if the string cannot be parsed as a duration.
     """
     if not ts:
         return None
-    ts = ts.strip()
+    ts = ts.strip().lower()
 
-    # Try to split on common range separators: " - ", "–", "-" (with optional spaces)
-    for sep in (" - ", " – ", "–", " -", "- "):
-        if sep in ts:
-            parts = ts.split(sep, 1)
-            start_dt = _parse_time_slot(parts[0].strip(), event_date)
-            end_dt   = _parse_time_slot(parts[1].strip(), event_date)
-            if start_dt and end_dt:
-                return start_dt, end_dt
-            break
+    # Hours pattern: "1 hr", "1.5 hrs", "2 hours", "2 hour"
+    m = re.match(r'^(\d+(?:\.\d+)?)\s*ho?u?r', ts)
+    if m:
+        return int(float(m.group(1)) * 60)
 
-    # Single time — use default duration
-    start_dt = _parse_time_slot(ts, event_date)
-    if start_dt:
-        return start_dt, start_dt + timedelta(minutes=DURATIONS["hair"])
+    # Minutes pattern: "30 min", "45 mins", "60 minutes", "30m"
+    m = re.match(r'^(\d+)\s*m', ts)
+    if m:
+        return int(m.group(1))
+
+    # Bare number — assume minutes
+    m = re.match(r'^(\d+)$', ts)
+    if m:
+        return int(m.group(1))
+
     return None
 
 
@@ -354,13 +355,15 @@ class Scheduler:
         earliest: datetime,
         group_key: str | None,
         model_busy: list[tuple[datetime, datetime]],
+        duration_min: int | None = None,
     ) -> tuple[datetime, datetime] | None:
         """
         Find the earliest slot >= earliest that is free for both the provider
         and the model, outside any blackout window, within the service window.
+        duration_min overrides the global DURATIONS default when provided.
         """
         win_start, win_end = WINDOWS[service]
-        dur = timedelta(minutes=DURATIONS[service])
+        dur = timedelta(minutes=duration_min if duration_min is not None else DURATIONS[service])
         cal = self.calendars.get(provider_key)
         if not cal:
             return None
@@ -486,28 +489,19 @@ class Scheduler:
                 print(msg)
                 warnings.append(msg[7:])
             else:
-                hair_range = _parse_time_range(model.get("hair_time_slot", ""), self._event_date)
-                if hair_range:
-                    # Sheet has a time — book it directly, no sliding
-                    start, end = hair_range
+                hair_dur = _parse_duration_min(model.get("hair_time_slot", ""))
+                hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
+                best_slot = None
+                for search_start in hair_search_starts:
+                    best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur)
+                    if best_slot:
+                        break
+                if best_slot:
+                    start, end = best_slot
                     self._book("hair", hair_cal_key, start, end, name)
                     model_busy.append((start, end))
                     appointments["hair"] = {"provider": hair_cal_key[len("hair::"):], "start": start, "end": end}
                     hair_end = end
-                else:
-                    # No time slot — fall back to search algorithm with default duration
-                    hair_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
-                    best_slot = None
-                    for search_start in hair_search_starts:
-                        best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy)
-                        if best_slot:
-                            break
-                    if best_slot:
-                        start, end = best_slot
-                        self._book("hair", hair_cal_key, start, end, name)
-                        model_busy.append((start, end))
-                        appointments["hair"] = {"provider": hair_cal_key[len("hair::"):], "start": start, "end": end}
-                        hair_end = end
 
         # ── 3. Makeup ──────────────────────────────────────────────────────────
         # Only schedule if the sheet has an assigned artist — blank = no makeup.
@@ -525,31 +519,20 @@ class Scheduler:
                 print(msg)
                 warnings.append(msg[7:])
             else:
-                mu_slot_dt = _parse_time_slot(model.get("makeup_time_slot", ""), self._event_date)
-                mu_range = _parse_time_range(model.get("makeup_time_slot", ""), self._event_date)
+                mu_dur = _parse_duration_min(model.get("makeup_time_slot", ""))
                 if same_artist and hair_end > day_start:
                     # Same artist — makeup starts immediately after hair, no gap
-                    # Duration: use makeup range length if given, else default
-                    mu_dur = (mu_range[1] - mu_range[0]) if mu_range else timedelta(minutes=DURATIONS["makeup"])
                     start = hair_end
-                    end = start + mu_dur
-                    self._book("makeup", mu_cal_key, start, end, name)
-                    model_busy.append((start, end))
-                    appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
-                    makeup_end = end
-                elif mu_range:
-                    # Sheet has a time — book it directly, no sliding
-                    start, end = mu_range
+                    end = start + timedelta(minutes=mu_dur if mu_dur else DURATIONS["makeup"])
                     self._book("makeup", mu_cal_key, start, end, name)
                     model_busy.append((start, end))
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
                 else:
-                    # No time slot — fall back to search algorithm
                     makeup_search_starts = [blackout_end, day_start] if prefer_afternoon else [day_start]
                     best_slot = None
                     for search_start in makeup_search_starts:
-                        best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy)
+                        best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy, duration_min=mu_dur)
                         if best_slot:
                             break
                     if best_slot:
