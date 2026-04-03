@@ -431,36 +431,7 @@ class Scheduler:
         scheduling_hint = model.get("scheduling_hint", "")
         prefer_afternoon = (scheduling_hint == "later")
 
-        # ── 0. Massage (9 AM – 5 PM, independent of glam) ─────────────────────
-        # Only scheduled when the services CSV marks Chair Massage = Y.
-        # If no services CSV was uploaded, wants_chair_massage defaults to True
-        # so all models still get massages (backwards-compatible).
         warnings: list[str] = []
-        massage_keys = sorted(k for k in self.calendars if k.startswith("massage::"))
-        if massage_keys and model.get("wants_chair_massage", True):
-            best_slot, best_key = None, None
-            for mk in massage_keys:
-                slot = self._find_slot(
-                    "massage", mk, WINDOWS["massage"][0], group_key, model_busy
-                )
-                if slot:
-                    cand_load = self._booking_count(self.calendars[mk].name)
-                    best_load = (
-                        self._booking_count(self.calendars[best_key].name)
-                        if best_key else float("inf")
-                    )
-                    if best_slot is None or cand_load < best_load:
-                        best_slot, best_key = slot, mk
-            if best_slot:
-                cal_start, cal_end = best_slot
-                session_end = cal_start + timedelta(minutes=MASSAGE_SESSION_MIN)
-                self._book("massage", best_key, cal_start, cal_end, name)
-                model_busy.append((cal_start, cal_end))   # block full 15 min for model
-                appointments["massage"] = {
-                    "provider": self.calendars[best_key].name,
-                    "start": cal_start,
-                    "end": session_end,   # display only the 10-min session
-                }
 
         # ── 1. Hair ────────────────────────────────────────────────────────────
         # Only schedule if the sheet has an assigned stylist AND Hair != No.
@@ -528,6 +499,44 @@ class Scheduler:
                         model_busy.append((start, end))
                         appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                         makeup_end = end
+
+        # ── 3b. Massage — must finish BEFORE hair and makeup start ────────────────
+        # Schedule last so we know the actual hair/makeup start times, then
+        # find the latest massage slot that ends before glam begins.
+        glam_start = None
+        if "hair" in appointments:
+            glam_start = appointments["hair"]["start"]
+        if "makeup" in appointments:
+            mu_s = appointments["makeup"]["start"]
+            glam_start = mu_s if glam_start is None else min(glam_start, mu_s)
+
+        massage_keys = sorted(k for k in self.calendars if k.startswith("massage::"))
+        if massage_keys and model.get("wants_chair_massage", False):
+            # Search from 9 AM; must end by glam_start (or window end if no glam)
+            massage_deadline = glam_start if glam_start else WINDOWS["massage"][1]
+            best_slot, best_key = None, None
+            for mk in massage_keys:
+                slot = self._find_slot(
+                    "massage", mk, WINDOWS["massage"][0], group_key, model_busy
+                )
+                if slot and slot[1] <= massage_deadline:
+                    cand_load = self._booking_count(self.calendars[mk].name)
+                    best_load = (
+                        self._booking_count(self.calendars[best_key].name)
+                        if best_key else float("inf")
+                    )
+                    if best_slot is None or cand_load < best_load:
+                        best_slot, best_key = slot, mk
+            if best_slot:
+                cal_start, cal_end = best_slot
+                session_end = cal_start + timedelta(minutes=MASSAGE_SESSION_MIN)
+                self._book("massage", best_key, cal_start, cal_end, name)
+                model_busy.append((cal_start, cal_end))
+                appointments["massage"] = {
+                    "provider": self.calendars[best_key].name,
+                    "start": cal_start,
+                    "end": session_end,
+                }
 
         # ── 4. Portrait (Models and HAs only — board members and specific names excluded) ──
         _PORTRAIT_EXCLUDE = {
