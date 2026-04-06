@@ -145,6 +145,8 @@ def schedule_to_artist_csv(provider_schedules: list[dict], output_path: str | No
             f.write(csv_str)
     return csv_str
 
+
+def schedule_to_master_csv(schedule_rows: list[dict], output_path: str | None = None) -> str:
     """
     Export the full master schedule (one row per model) as CSV.
     Useful for printing / sharing with the team.
@@ -161,5 +163,6 @@ def schedule_to_artist_csv(provider_schedules: list[dict], output_path: str | No
     if output_path:
         with open(output_path, "w", newline="") as f:
             f.write(csv_str)
+    return csv_str
 
     return csv_str
