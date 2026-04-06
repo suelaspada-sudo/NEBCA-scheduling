@@ -389,7 +389,7 @@ class Scheduler:
                     best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur)
                     if best_slot:
                         break
-                # Final fallback: ignore later/earlier hint and find ANY slot
+                # Fallback: ignore later/earlier hint and try full window
                 if not best_slot:
                     best_slot = self._find_slot("hair", hair_cal_key, day_start, group_key, model_busy, duration_min=hair_dur)
                 if best_slot:
@@ -398,6 +398,11 @@ class Scheduler:
                     model_busy.append((start, end))
                     appointments["hair"] = {"provider": hair_cal_key[len("hair::"):], "start": start, "end": end}
                     hair_end = end
+                else:
+                    artist_name = hair_cal_key[len("hair::"):]
+                    msg = f"[WARN] {name}: no available hair slot with {artist_name} (artist fully booked 11am-5pm)"
+                    print(msg)
+                    warnings.append(msg[7:])
 
         # ── 3. Makeup ──────────────────────────────────────────────────────────
         # Only schedule if the sheet has an assigned artist AND Makeup != No.
@@ -440,6 +445,11 @@ class Scheduler:
                         model_busy.append((start, end))
                         appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                         makeup_end = end
+                    else:
+                        artist_name = mu_cal_key[len("makeup::"):]
+                        msg = f"[WARN] {name}: no available makeup slot with {artist_name} (artist fully booked 11am-5pm)"
+                        print(msg)
+                        warnings.append(msg[7:])
 
         # ── 3b. Massage — must finish BEFORE hair and makeup start ────────────────
         # Schedule last so we know the actual hair/makeup start times, then
