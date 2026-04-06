@@ -533,12 +533,24 @@ class Scheduler:
         Artists with ≤3 models get no break.
         Break is placed in the first 30-min gap after 12pm in the artist's calendar,
         so it never blocks a model slot.
+
+        Specific overrides (artist name → (start_hour, start_min)):
+          Lauren  → 1:30 PM
+          Megan   → 1:30 PM
+          Gianna  → 2:30 PM
         """
         _break_dur = timedelta(minutes=30)
         _break_win_start = _make_dt(self._event_date, 12, 0)
         _break_win_end   = WINDOWS["hair"][1]   # 5:00 PM
         _portrait_break  = _make_dt(self._event_date, 14, 30)
         _massage_break   = _make_dt(self._event_date, 12, 30)
+
+        # Hardcoded break start times for specific artists (case-insensitive prefix match)
+        _ARTIST_BREAK_OVERRIDES = {
+            "lauren": _make_dt(self._event_date, 13, 30),
+            "megan":  _make_dt(self._event_date, 13, 30),
+            "gianna": _make_dt(self._event_date, 14, 30),
+        }
 
         seen_artist: set[str] = set()
 
@@ -563,17 +575,28 @@ class Scheduler:
             all_keys = [k for k in self.calendars if
                         not k.startswith("portrait::") and not k.startswith("massage::")
                         and self.calendars[k].name == aname]
-            booked = sorted(
-                set((s, e) for k in all_keys for s, e, _ in self.calendars[k].slots),
-                key=lambda x: x[0]
-            )
 
-            b_start = _break_win_start
-            for s, e in booked:
-                if b_start + _break_dur <= s:
-                    break   # gap found before this slot
-                if e > b_start:
-                    b_start = e  # push past this slot
+            # Check for a hardcoded break override for this artist
+            aname_lower = aname.strip().lower()
+            override_start = None
+            for prefix, override_dt in _ARTIST_BREAK_OVERRIDES.items():
+                if aname_lower.startswith(prefix):
+                    override_start = override_dt
+                    break
+
+            if override_start is not None:
+                b_start = override_start
+            else:
+                booked = sorted(
+                    set((s, e) for k in all_keys for s, e, _ in self.calendars[k].slots),
+                    key=lambda x: x[0]
+                )
+                b_start = _break_win_start
+                for s, e in booked:
+                    if b_start + _break_dur <= s:
+                        break   # gap found before this slot
+                    if e > b_start:
+                        b_start = e  # push past this slot
 
             if b_start + _break_dur <= _break_win_end:
                 # Book the break on every calendar belonging to this artist
