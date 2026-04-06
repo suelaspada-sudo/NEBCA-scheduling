@@ -350,6 +350,9 @@ class Scheduler:
 
         return None
 
+    def _book(self, service: str, provider_key: str, start: datetime, end: datetime, model_name: str):
+        self.calendars[provider_key].book(start, end, model_name)
+
     def _find_slot_any_fit(
         self,
         service: str,
