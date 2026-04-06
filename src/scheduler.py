@@ -353,40 +353,6 @@ class Scheduler:
     def _book(self, service: str, provider_key: str, start: datetime, end: datetime, model_name: str):
         self.calendars[provider_key].book(start, end, model_name)
 
-    def _find_slot_any_fit(
-        self,
-        service: str,
-        provider_key: str,
-        earliest: datetime,
-        group_key: str | None,
-        model_busy: list[tuple[datetime, datetime]],
-        requested_min: int | None,
-    ) -> tuple[datetime, datetime] | None:
-        """
-        Try to find a slot with the requested duration. If that fails,
-        progressively try shorter durations (down to 15 min) so no model
-        is ever left completely unscheduled.
-        """
-        default = DURATIONS[service]
-        durations_to_try = []
-        # Build fallback list: requested, then stepping down by 15 to minimum 15
-        base = requested_min if requested_min else default
-        d = base
-        while d >= 15:
-            durations_to_try.append(d)
-            d -= 15
-        if 15 not in durations_to_try:
-            durations_to_try.append(15)
-
-        for dur in durations_to_try:
-            slot = self._find_slot(service, provider_key, earliest, group_key, model_busy, duration_min=dur)
-            if slot:
-                return slot
-        return None
-
-
-        self.calendars[provider_key].book(start, end, model_name)
-
     def _schedule_model(self, model: dict, stagger_idx: int = 0) -> dict:
         name = model["name"]
         group_key = _group_key(model)
@@ -417,11 +383,15 @@ class Scheduler:
                 # "later" note → try afternoon first, then fall back to morning
                 # Everyone else → fill from 11am in order, no gaps
                 # Prefer afternoon if Notes say "later", but always fall back to day_start
-                search_start = WINDOWS["hair"][1] - timedelta(hours=3) if prefer_afternoon else day_start
-                best_slot = self._find_slot_any_fit("hair", hair_cal_key, search_start, group_key, model_busy, hair_dur)
-                # If afternoon preference couldn't be satisfied, try from morning
-                if not best_slot and prefer_afternoon:
-                    best_slot = self._find_slot_any_fit("hair", hair_cal_key, day_start, group_key, model_busy, hair_dur)
+                hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
+                best_slot = None
+                for search_start in hair_search_starts:
+                    best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur)
+                    if best_slot:
+                        break
+                # Fallback: ignore later/earlier hint and try full window
+                if not best_slot:
+                    best_slot = self._find_slot("hair", hair_cal_key, day_start, group_key, model_busy, duration_min=hair_dur)
                 if best_slot:
                     start, end = best_slot
                     self._book("hair", hair_cal_key, start, end, name)
@@ -460,10 +430,15 @@ class Scheduler:
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
                 else:
-                    mu_search_start = WINDOWS["makeup"][1] - timedelta(hours=3) if prefer_afternoon else day_start
-                    best_slot = self._find_slot_any_fit("makeup", mu_cal_key, mu_search_start, group_key, model_busy, mu_dur)
-                    if not best_slot and prefer_afternoon:
-                        best_slot = self._find_slot_any_fit("makeup", mu_cal_key, day_start, group_key, model_busy, mu_dur)
+                    makeup_search_starts = [WINDOWS["makeup"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
+                    best_slot = None
+                    for search_start in makeup_search_starts:
+                        best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy, duration_min=mu_dur)
+                        if best_slot:
+                            break
+                    # Final fallback: ignore later/earlier hint and find ANY slot
+                    if not best_slot:
+                        best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
                     if best_slot:
                         start, end = best_slot
                         self._book("makeup", mu_cal_key, start, end, name)
@@ -663,6 +638,86 @@ class Scheduler:
         for data in by_name.values():
             data["slots"].sort(key=lambda x: x["start"])
         return sorted(by_name.values(), key=lambda x: x["name"])
+
+
+# ─── Capacity diagnostic ─────────────────────────────────────────────────────
+
+def artist_capacity_report(models: list[dict]) -> list[dict]:
+    """
+    For each glam artist, calculate:
+      - total minutes needed by their assigned models (hair + makeup)
+      - available minutes in the 11am–5pm window (360 min)
+      - overflow amount
+      - list of models with their durations
+      - swap suggestions: models that could move to a less-loaded artist of the same service
+
+    Returns a list of artist dicts sorted by overflow descending.
+    """
+    AVAIL_MIN = 360  # 11am–5pm
+    FALLBACK_DUR = 45  # default if no time slot specified
+
+    # Collect per-artist data
+    hair_artists: dict[str, list[dict]] = {}   # artist_name → [{model, minutes}]
+    makeup_artists: dict[str, list[dict]] = {}
+
+    for m in models:
+        h_artist = m.get("assigned_hair_stylist", "").strip()
+        mu_artist = m.get("assigned_makeup_artist", "").strip()
+
+        if h_artist and m.get("wants_hair", True):
+            dur = _parse_duration_min(m.get("hair_time_slot", "")) or FALLBACK_DUR
+            hair_artists.setdefault(h_artist, []).append({
+                "model": m["name"], "minutes": dur, "group": m.get("group", ""),
+            })
+
+        if mu_artist and m.get("wants_makeup", True):
+            dur = _parse_duration_min(m.get("makeup_time_slot", "")) or FALLBACK_DUR
+            makeup_artists.setdefault(mu_artist, []).append({
+                "model": m["name"], "minutes": dur, "group": m.get("group", ""),
+            })
+
+    results = []
+
+    def _process(service: str, artist_map: dict[str, list[dict]]):
+        totals = {a: sum(e["minutes"] for e in entries) for a, entries in artist_map.items()}
+        for artist, entries in artist_map.items():
+            total = totals[artist]
+            overflow = max(0, total - AVAIL_MIN)
+            # Find models that could be moved to a less-loaded artist (same service)
+            suggestions = []
+            if overflow > 0:
+                # Sort this artist's models: swap the last/smallest ones first
+                candidates = sorted(entries, key=lambda x: x["minutes"])
+                for cand in candidates:
+                    # Find other artists with room
+                    for other_artist, other_total in sorted(totals.items(), key=lambda x: x[1]):
+                        if other_artist == artist:
+                            continue
+                        if other_total + cand["minutes"] <= AVAIL_MIN:
+                            suggestions.append({
+                                "model": cand["model"],
+                                "minutes": cand["minutes"],
+                                "move_to": other_artist,
+                                "other_artist_current_min": other_total,
+                                "other_artist_after_min": other_total + cand["minutes"],
+                            })
+                            break
+
+            results.append({
+                "artist": artist,
+                "service": service,
+                "total_min": total,
+                "available_min": AVAIL_MIN,
+                "overflow_min": overflow,
+                "models": sorted(entries, key=lambda x: x["minutes"], reverse=True),
+                "suggestions": suggestions,
+            })
+
+    _process("hair", hair_artists)
+    _process("makeup", makeup_artists)
+
+    results.sort(key=lambda x: x["overflow_min"], reverse=True)
+    return results
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

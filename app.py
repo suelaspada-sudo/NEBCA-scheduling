@@ -16,7 +16,7 @@ import pandas as pd
 from src.parser import (
     parse_models_master, parse_contact_info, parse_services, merge_services,
 )
-from src.scheduler import Scheduler, schedule_to_rows
+from src.scheduler import Scheduler, schedule_to_rows, artist_capacity_report
 from src.exporter import schedule_to_wix_csv, schedule_to_master_csv
 
 app = Flask(__name__)
@@ -204,6 +204,15 @@ def artists():
 @app.route("/debug/artists")
 def debug_artists():
     return jsonify([{"name": a["name"], "role": a["role"]} for a in STATE["artists"]])
+
+
+@app.route("/debug/capacity")
+def debug_capacity():
+    if not STATE["models"]:
+        flash("Upload models first.", "error")
+        return redirect(url_for("index"))
+    report = artist_capacity_report(STATE["models"])
+    return render_template("capacity_report.html", report=report)
 
 
 @app.route("/schedule/providers")

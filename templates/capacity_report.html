@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Artist Capacity Report</title>
+  <style>
+    body { font-family: sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.5rem; }
+    .artist-block { border: 1px solid #ddd; border-radius: 6px; margin-bottom: 1.5rem; padding: 1rem 1.2rem; }
+    .artist-block.overbooked { border-color: #e55; background: #fff5f5; }
+    .artist-block.ok { border-color: #5a5; background: #f5fff5; }
+    .artist-header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 0.5rem; }
+    .artist-name { font-size: 1.1rem; font-weight: bold; }
+    .badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; font-weight: bold; }
+    .badge.over { background: #e55; color: #fff; }
+    .badge.ok { background: #5a5; color: #fff; }
+    .service-label { color: #666; font-size: 0.85rem; text-transform: capitalize; }
+    .bar-wrap { background: #eee; border-radius: 4px; height: 10px; width: 300px; display: inline-block; vertical-align: middle; margin: 0 8px; }
+    .bar-fill { height: 10px; border-radius: 4px; }
+    .bar-fill.over { background: #e55; }
+    .bar-fill.ok   { background: #5a5; }
+    table { border-collapse: collapse; width: 100%; margin-top: 0.6rem; font-size: 0.9rem; }
+    th { text-align: left; background: #f0f0f0; padding: 4px 8px; }
+    td { padding: 4px 8px; border-top: 1px solid #eee; }
+    .suggestions { margin-top: 0.8rem; background: #fffbe5; border: 1px solid #f0c040; border-radius: 4px; padding: 0.6rem 0.9rem; }
+    .suggestions h4 { margin: 0 0 0.4rem; font-size: 0.9rem; color: #7a5a00; }
+    .suggestions ul { margin: 0; padding-left: 1.2rem; font-size: 0.88rem; }
+    .back { margin-bottom: 1.2rem; }
+    .summary { margin-bottom: 1.5rem; padding: 0.8rem 1rem; background: #f7f7f7; border-radius: 6px; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="back"><a href="/">&larr; Back to home</a></div>
+  <h1>Artist Capacity Report</h1>
+  <p class="summary">
+    Available window: <strong>11:00 AM – 5:00 PM (360 min)</strong>.
+    Artists shown red are overbooked — their models' total requested time exceeds 360 minutes.
+    Swap suggestions show which model(s) could move to another artist with room.
+  </p>
+
+  {% for a in report %}
+  <div class="artist-block {{ 'overbooked' if a.overflow_min > 0 else 'ok' }}">
+    <div class="artist-header">
+      <span class="artist-name">{{ a.artist }}</span>
+      <span class="service-label">{{ a.service }}</span>
+      {% if a.overflow_min > 0 %}
+        <span class="badge over">OVERBOOKED +{{ a.overflow_min }} min</span>
+      {% else %}
+        <span class="badge ok">OK ({{ a.available_min - a.total_min }} min spare)</span>
+      {% endif %}
+    </div>
+
+    <div>
+      {{ a.total_min }} min needed &nbsp;
+      <span class="bar-wrap">
+        {% set pct = [((a.total_min / a.available_min) * 100) | int, 100] | min %}
+        <div class="bar-fill {{ 'over' if a.overflow_min > 0 else 'ok' }}" style="width: {{ pct }}%;"></div>
+      </span>
+      &nbsp; / {{ a.available_min }} min available
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Model</th><th>Group</th><th>Minutes</th></tr>
+      </thead>
+      <tbody>
+        {% for m in a.models %}
+        <tr>
+          <td>{{ m.model }}</td>
+          <td>{{ m.group }}</td>
+          <td>{{ m.minutes }}</td>
+        </tr>
+        {% endfor %}
+        <tr style="font-weight:bold; background:#f8f8f8;">
+          <td colspan="2">Total</td>
+          <td>{{ a.total_min }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    {% if a.suggestions %}
+    <div class="suggestions">
+      <h4>Swap suggestions to relieve overflow:</h4>
+      <ul>
+        {% for s in a.suggestions %}
+        <li>
+          Move <strong>{{ s.model }}</strong> ({{ s.minutes }} min) to
+          <strong>{{ s.move_to }}</strong>
+          ({{ s.other_artist_current_min }} min &rarr; {{ s.other_artist_after_min }} min, still within 360 min)
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</body>
+</html>
