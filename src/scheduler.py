@@ -223,75 +223,17 @@ class Scheduler:
             if mname not in self.artists:
                 self.artists[mname] = {"name": mname, "role": "massage", "max_models": 999}
 
-        # ── Pre-book 30-minute breaks ─────────────────────────────────────────
-
-        _break_dur = timedelta(minutes=30)
-
-        # Glam/portrait breaks: staggered around 2:30 PM (between the two group
-        # rehearsal blackouts).  5 offsets cover most team sizes; they cycle after.
-        _glam_break_offsets = [
-            timedelta(minutes=-30),  # 2:00 – 2:30 PM
-            timedelta(minutes=-15),  # 2:15 – 2:45 PM
-            timedelta(minutes=0),    # 2:30 – 3:00 PM
-            timedelta(minutes=15),   # 2:45 – 3:15 PM
-            timedelta(minutes=30),   # 3:00 – 3:30 PM
-        ]
-        _glam_base = _make_dt(event_date, 14, 30)  # 2:30 PM
-        _glam_win_end = WINDOWS["hair"][1]          # 5:00 PM
-
-        # Portrait: fixed 2:30 PM break
-        _portrait_break = _glam_base
-
-        # Massage: break at 12:30 PM (mid-morning, before glam rush)
-        _massage_break = _make_dt(event_date, 12, 30)
-
-        # Compute each artist's earliest expected appointment from models' time slots
-        # so that we never book a break BEFORE they have started working.
-        artist_earliest: dict[str, datetime] = {}
+        # Count unique models assigned to each glam artist (hair + makeup combined)
+        artist_model_count: dict[str, set] = {}
         for model in self.models:
-            h_name = model.get("assigned_hair_stylist", "").strip()
-            m_name = model.get("assigned_makeup_artist", "").strip()
-            h_ts = _parse_time_slot(model.get("hair_time_slot", ""), event_date)
-            m_ts = _parse_time_slot(model.get("makeup_time_slot", ""), event_date)
-            if h_name and h_ts:
-                if h_name not in artist_earliest or h_ts < artist_earliest[h_name]:
-                    artist_earliest[h_name] = h_ts
-            if m_name and m_ts:
-                if m_name not in artist_earliest or m_ts < artist_earliest[m_name]:
-                    artist_earliest[m_name] = m_ts
+            h = model.get("assigned_hair_stylist", "").strip()
+            m = model.get("assigned_makeup_artist", "").strip()
+            if h:
+                artist_model_count.setdefault(h, set()).add(model["name"])
+            if m:
+                artist_model_count.setdefault(m, set()).add(model["name"])
 
-        # Assign each unique glam artist a staggered break slot,
-        # ensuring the break is not booked before their first appointment.
-        glam_names_ordered = sorted(
-            set(
-                cal.name
-                for key, cal in self.calendars.items()
-                if not key.startswith("portrait::") and not key.startswith("massage::")
-            )
-        )
-        _name_to_break: dict[str, tuple] = {}
-        for i, aname in enumerate(glam_names_ordered):
-            staggered = _glam_base + _glam_break_offsets[i % len(_glam_break_offsets)]
-            earliest = artist_earliest.get(aname)
-            if earliest is not None:
-                # Break must not start before the artist's first expected appointment
-                min_break_start = earliest + timedelta(minutes=1)
-                b_start = max(staggered, min_break_start)
-            else:
-                b_start = staggered
-            # Cap so the break fits within the working window
-            max_break_start = _glam_win_end - _break_dur
-            b_start = min(b_start, max_break_start)
-            _name_to_break[aname] = (b_start, b_start + _break_dur)
-
-        for key, cal in self.calendars.items():
-            if key.startswith("portrait::"):
-                cal.book(_portrait_break, _portrait_break + _break_dur, "__break__")
-            elif key.startswith("massage::"):
-                cal.book(_massage_break, _massage_break + _break_dur, "__break__")
-            else:
-                b_start, b_end = _name_to_break[cal.name]
-                cal.book(b_start, b_end, "__break__")
+        self._artist_model_count = {k: len(v) for k, v in artist_model_count.items()}
 
         self.schedule: list[dict] = []
 
@@ -575,11 +517,65 @@ class Scheduler:
             "warnings": warnings,
         }
 
+    def _book_breaks(self):
+        """
+        Book 30-minute breaks after scheduling is complete.
+        Artists with ≤3 models get no break.
+        Break is placed in the first 30-min gap after 12pm in the artist's calendar,
+        so it never blocks a model slot.
+        """
+        _break_dur = timedelta(minutes=30)
+        _break_win_start = _make_dt(self._event_date, 12, 0)
+        _break_win_end   = WINDOWS["hair"][1]   # 5:00 PM
+        _portrait_break  = _make_dt(self._event_date, 14, 30)
+        _massage_break   = _make_dt(self._event_date, 12, 30)
+
+        seen_artist: set[str] = set()
+
+        for key, cal in self.calendars.items():
+            if key.startswith("portrait::"):
+                cal.book(_portrait_break, _portrait_break + _break_dur, "__break__")
+                continue
+            if key.startswith("massage::"):
+                cal.book(_massage_break, _massage_break + _break_dur, "__break__")
+                continue
+
+            aname = cal.name
+            if aname in seen_artist:
+                continue
+            seen_artist.add(aname)
+
+            # Skip break for artists with 3 or fewer models
+            if self._artist_model_count.get(aname, 0) <= 3:
+                continue
+
+            # Find the first 30-min gap in the artist's combined calendar after 12pm
+            all_keys = [k for k in self.calendars if
+                        not k.startswith("portrait::") and not k.startswith("massage::")
+                        and self.calendars[k].name == aname]
+            booked = sorted(
+                set((s, e) for k in all_keys for s, e, _ in self.calendars[k].slots),
+                key=lambda x: x[0]
+            )
+
+            b_start = _break_win_start
+            for s, e in booked:
+                if b_start + _break_dur <= s:
+                    break   # gap found before this slot
+                if e > b_start:
+                    b_start = e  # push past this slot
+
+            if b_start + _break_dur <= _break_win_end:
+                # Book the break on every calendar belonging to this artist
+                for k in all_keys:
+                    self.calendars[k].book(b_start, b_start + _break_dur, "__break__")
+
     def run(self) -> list[dict]:
         """Schedule all models in the exact order they appear in the sheet."""
         for stagger_idx, model in enumerate(self.models):
             self.schedule.append(self._schedule_model(model, stagger_idx=stagger_idx))
 
+        self._book_breaks()
         return self.schedule
 
     def get_provider_schedules(self) -> list[dict]:
