@@ -449,6 +449,16 @@ class Scheduler:
                         artist_name = mu_cal_key[len("makeup::"):]
                         msg = f"[WARN] {name}: no available makeup slot with {artist_name} (artist fully booked 11am-5pm)"
                         print(msg)
+                        # Debug: dump artist calendar to help diagnose
+                        cal = self.calendars.get(mu_cal_key)
+                        if cal:
+                            sibling = self.calendars.get(f"hair::{cal.name}")
+                            all_slots = sorted(cal.slots + (sibling.slots if sibling else []), key=lambda x: x[0])
+                            print(f"  {artist_name} calendar ({len(all_slots)} slots):")
+                            for s, e, m in all_slots:
+                                print(f"    {fmt_time(s)}–{fmt_time(e)}  {m}")
+                            print(f"  model_busy: {[(fmt_time(s), fmt_time(e)) for s,e in sorted(model_busy)]}")
+                            print(f"  group_key: {group_key}, mu_dur: {mu_dur}")
                         warnings.append(msg[7:])
 
         # ── 3b. Massage — must finish BEFORE hair and makeup start ────────────────
