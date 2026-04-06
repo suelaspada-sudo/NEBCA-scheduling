@@ -667,21 +667,19 @@ class Scheduler:
 
 def artist_capacity_report(models: list[dict]) -> list[dict]:
     """
-    For each glam artist, calculate:
-      - total minutes needed by their assigned models (hair + makeup)
-      - available minutes in the 11am–5pm window (360 min)
-      - overflow amount
-      - list of models with their durations
-      - swap suggestions: models that could move to a less-loaded artist of the same service
+    For each glam artist, calculate total minutes needed vs 360-min window.
+
+    IMPORTANT: Artists who do BOTH hair and makeup share the same 11am–5pm
+    timeline, so their combined hair + makeup total is checked against 360 min,
+    not each service independently.
 
     Returns a list of artist dicts sorted by overflow descending.
     """
     AVAIL_MIN = 360  # 11am–5pm
     FALLBACK_DUR = 45  # default if no time slot specified
 
-    # Collect per-artist data
-    hair_artists: dict[str, list[dict]] = {}   # artist_name → [{model, minutes}]
-    makeup_artists: dict[str, list[dict]] = {}
+    # artist_name → {hair: [{model, minutes, group}], makeup: [...]}
+    by_artist: dict[str, dict] = {}
 
     for m in models:
         h_artist = m.get("assigned_hair_stylist", "").strip()
@@ -689,55 +687,73 @@ def artist_capacity_report(models: list[dict]) -> list[dict]:
 
         if h_artist and m.get("wants_hair", True):
             dur = _parse_duration_min(m.get("hair_time_slot", "")) or FALLBACK_DUR
-            hair_artists.setdefault(h_artist, []).append({
+            by_artist.setdefault(h_artist, {"hair": [], "makeup": []})
+            by_artist[h_artist]["hair"].append({
                 "model": m["name"], "minutes": dur, "group": m.get("group", ""),
             })
 
         if mu_artist and m.get("wants_makeup", True):
             dur = _parse_duration_min(m.get("makeup_time_slot", "")) or FALLBACK_DUR
-            makeup_artists.setdefault(mu_artist, []).append({
+            by_artist.setdefault(mu_artist, {"hair": [], "makeup": []})
+            by_artist[mu_artist]["makeup"].append({
                 "model": m["name"], "minutes": dur, "group": m.get("group", ""),
             })
 
     results = []
+    # Build combined totals for swap suggestions
+    combined_totals = {
+        a: sum(e["minutes"] for e in d["hair"]) + sum(e["minutes"] for e in d["makeup"])
+        for a, d in by_artist.items()
+    }
 
-    def _process(service: str, artist_map: dict[str, list[dict]]):
-        totals = {a: sum(e["minutes"] for e in entries) for a, entries in artist_map.items()}
-        for artist, entries in artist_map.items():
-            total = totals[artist]
-            overflow = max(0, total - AVAIL_MIN)
-            # Find models that could be moved to a less-loaded artist (same service)
-            suggestions = []
-            if overflow > 0:
-                # Sort this artist's models: swap the last/smallest ones first
-                candidates = sorted(entries, key=lambda x: x["minutes"])
-                for cand in candidates:
-                    # Find other artists with room
-                    for other_artist, other_total in sorted(totals.items(), key=lambda x: x[1]):
-                        if other_artist == artist:
-                            continue
-                        if other_total + cand["minutes"] <= AVAIL_MIN:
-                            suggestions.append({
-                                "model": cand["model"],
-                                "minutes": cand["minutes"],
-                                "move_to": other_artist,
-                                "other_artist_current_min": other_total,
-                                "other_artist_after_min": other_total + cand["minutes"],
-                            })
-                            break
+    for artist, data in by_artist.items():
+        hair_entries = data["hair"]
+        mu_entries   = data["makeup"]
+        is_both = bool(hair_entries and mu_entries)
 
-            results.append({
-                "artist": artist,
-                "service": service,
-                "total_min": total,
-                "available_min": AVAIL_MIN,
-                "overflow_min": overflow,
-                "models": sorted(entries, key=lambda x: x["minutes"], reverse=True),
-                "suggestions": suggestions,
-            })
+        hair_total = sum(e["minutes"] for e in hair_entries)
+        mu_total   = sum(e["minutes"] for e in mu_entries)
+        total      = hair_total + mu_total if is_both else (hair_total or mu_total)
+        service    = "both" if is_both else ("hair" if hair_entries else "makeup")
 
-    _process("hair", hair_artists)
-    _process("makeup", makeup_artists)
+        overflow = max(0, total - AVAIL_MIN)
+
+        # Swap suggestions: find specific models to move so overflow is relieved
+        suggestions = []
+        if overflow > 0:
+            # Try moving makeup models first (less disruption), then hair
+            candidates = sorted(mu_entries + hair_entries, key=lambda x: x["minutes"])
+            for cand in candidates:
+                for other_artist, other_total in sorted(combined_totals.items(), key=lambda x: x[1]):
+                    if other_artist == artist:
+                        continue
+                    if other_total + cand["minutes"] <= AVAIL_MIN:
+                        suggestions.append({
+                            "model": cand["model"],
+                            "minutes": cand["minutes"],
+                            "move_to": other_artist,
+                            "other_artist_current_min": other_total,
+                            "other_artist_after_min": other_total + cand["minutes"],
+                        })
+                        break
+
+        all_models = sorted(
+            [dict(e, service="hair") for e in hair_entries] +
+            [dict(e, service="makeup") for e in mu_entries],
+            key=lambda x: x["minutes"], reverse=True,
+        )
+
+        results.append({
+            "artist": artist,
+            "service": service,
+            "hair_total_min": hair_total,
+            "makeup_total_min": mu_total,
+            "total_min": total,
+            "available_min": AVAIL_MIN,
+            "overflow_min": overflow,
+            "models": all_models,
+            "suggestions": suggestions,
+        })
 
     results.sort(key=lambda x: x["overflow_min"], reverse=True)
     return results

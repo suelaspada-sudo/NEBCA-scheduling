@@ -51,7 +51,11 @@
     </div>
 
     <div>
-      {{ a.total_min }} min needed &nbsp;
+      {{ a.total_min }} min needed
+      {% if a.service == 'both' %}
+        <small style="color:#666">(hair {{ a.hair_total_min }} + makeup {{ a.makeup_total_min }})</small>
+      {% endif %}
+      &nbsp;
       <span class="bar-wrap">
         {% set pct = [((a.total_min / a.available_min) * 100) | int, 100] | min %}
         <div class="bar-fill {{ 'over' if a.overflow_min > 0 else 'ok' }}" style="width: {{ pct }}%;"></div>
@@ -61,18 +65,19 @@
 
     <table>
       <thead>
-        <tr><th>Model</th><th>Group</th><th>Minutes</th></tr>
+        <tr><th>Model</th><th>Group</th>{% if a.service == 'both' %}<th>Service</th>{% endif %}<th>Minutes</th></tr>
       </thead>
       <tbody>
         {% for m in a.models %}
         <tr>
           <td>{{ m.model }}</td>
           <td>{{ m.group }}</td>
+          {% if a.service == 'both' %}<td>{{ m.service }}</td>{% endif %}
           <td>{{ m.minutes }}</td>
         </tr>
         {% endfor %}
         <tr style="font-weight:bold; background:#f8f8f8;">
-          <td colspan="2">Total</td>
+          <td colspan="{{ 3 if a.service == 'both' else 2 }}">Total</td>
           <td>{{ a.total_min }}</td>
         </tr>
       </tbody>
