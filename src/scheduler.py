@@ -430,15 +430,11 @@ class Scheduler:
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
                 else:
-                    makeup_search_starts = [WINDOWS["makeup"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
-                    best_slot = None
-                    for search_start in makeup_search_starts:
-                        best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy, duration_min=mu_dur)
-                        if best_slot:
-                            break
-                    # Final fallback: ignore later/earlier hint and find ANY slot
-                    if not best_slot:
-                        best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
+                    # Always search makeup from 11am regardless of scheduling hint.
+                    # Afternoon preference for makeup causes group1 models to claim
+                    # the 4pm–5pm window, which is the only slot available for group2
+                    # models (who must wait until after their 1–2pm blackout).
+                    best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
                     if best_slot:
                         start, end = best_slot
                         self._book("makeup", mu_cal_key, start, end, name)
@@ -449,14 +445,6 @@ class Scheduler:
                         artist_name = mu_cal_key[len("makeup::"):]
                         msg = f"[WARN] {name}: no available makeup slot with {artist_name} (artist fully booked 11am-5pm)"
                         print(msg)
-                        # Debug: dump artist calendar to help diagnose
-                        _dcal = self.calendars.get(mu_cal_key)
-                        _dsib = self.calendars.get(f"hair::{artist_name}")
-                        _dall = sorted((_dcal.slots if _dcal else []) + (_dsib.slots if _dsib else []), key=lambda x: x[0])
-                        print(f"  DEBUG {artist_name}: {len(_dall)} slots booked:")
-                        for _s, _e, _m in _dall:
-                            print(f"    {fmt_time(_s)}–{fmt_time(_e)}  {_m}")
-                        print(f"  DEBUG model_busy={[(fmt_time(_s),fmt_time(_e)) for _s,_e in sorted(model_busy)]} group={group_key} dur={mu_dur}")
                         warnings.append(msg[7:])
 
         # ── 3b. Massage — must finish BEFORE hair and makeup start ────────────────
