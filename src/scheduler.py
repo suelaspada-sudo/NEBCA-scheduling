@@ -581,9 +581,31 @@ class Scheduler:
                     self.calendars[k].book(b_start, b_start + _break_dur, "__break__")
 
     def run(self) -> list[dict]:
-        """Schedule all models in the exact order they appear in the sheet."""
-        for stagger_idx, model in enumerate(self.models):
-            self.schedule.append(self._schedule_model(model, stagger_idx=stagger_idx))
+        """
+        Schedule all models.
+        Internally schedules most-constrained models first (those with rehearsal
+        blackouts have fewer available windows and must be placed before less-
+        constrained models grab their only viable slots).
+        Results are then sorted back to original sheet order for display.
+        """
+        def scheduling_priority(indexed_model):
+            idx, model = indexed_model
+            gk = _group_key(model)
+            # group1 and group2 have rehearsal blackouts → schedule first
+            if gk in ("group1", "group2", "hope_ambassador"):
+                return 0
+            # board members have no blackout → most flexible, schedule last
+            if gk == "board_member":
+                return 2
+            return 1
+
+        indexed = list(enumerate(self.models))
+        for _, model in sorted(indexed, key=scheduling_priority):
+            self.schedule.append(self._schedule_model(model))
+
+        # Restore original sheet order for display
+        order = {m["name"]: i for i, m in enumerate(self.models)}
+        self.schedule.sort(key=lambda r: order.get(r["model"], 9999))
 
         self._book_breaks()
         return self.schedule
