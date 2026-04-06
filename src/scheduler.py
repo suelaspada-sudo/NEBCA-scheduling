@@ -350,7 +350,38 @@ class Scheduler:
 
         return None
 
-    def _book(self, service: str, provider_key: str, start: datetime, end: datetime, model_name: str):
+    def _find_slot_any_fit(
+        self,
+        service: str,
+        provider_key: str,
+        earliest: datetime,
+        group_key: str | None,
+        model_busy: list[tuple[datetime, datetime]],
+        requested_min: int | None,
+    ) -> tuple[datetime, datetime] | None:
+        """
+        Try to find a slot with the requested duration. If that fails,
+        progressively try shorter durations (down to 15 min) so no model
+        is ever left completely unscheduled.
+        """
+        default = DURATIONS[service]
+        durations_to_try = []
+        # Build fallback list: requested, then stepping down by 15 to minimum 15
+        base = requested_min if requested_min else default
+        d = base
+        while d >= 15:
+            durations_to_try.append(d)
+            d -= 15
+        if 15 not in durations_to_try:
+            durations_to_try.append(15)
+
+        for dur in durations_to_try:
+            slot = self._find_slot(service, provider_key, earliest, group_key, model_busy, duration_min=dur)
+            if slot:
+                return slot
+        return None
+
+
         self.calendars[provider_key].book(start, end, model_name)
 
     def _schedule_model(self, model: dict, stagger_idx: int = 0) -> dict:
@@ -383,15 +414,11 @@ class Scheduler:
                 # "later" note → try afternoon first, then fall back to morning
                 # Everyone else → fill from 11am in order, no gaps
                 # Prefer afternoon if Notes say "later", but always fall back to day_start
-                hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
-                best_slot = None
-                for search_start in hair_search_starts:
-                    best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur)
-                    if best_slot:
-                        break
-                # Fallback: ignore later/earlier hint and try full window
-                if not best_slot:
-                    best_slot = self._find_slot("hair", hair_cal_key, day_start, group_key, model_busy, duration_min=hair_dur)
+                search_start = WINDOWS["hair"][1] - timedelta(hours=3) if prefer_afternoon else day_start
+                best_slot = self._find_slot_any_fit("hair", hair_cal_key, search_start, group_key, model_busy, hair_dur)
+                # If afternoon preference couldn't be satisfied, try from morning
+                if not best_slot and prefer_afternoon:
+                    best_slot = self._find_slot_any_fit("hair", hair_cal_key, day_start, group_key, model_busy, hair_dur)
                 if best_slot:
                     start, end = best_slot
                     self._book("hair", hair_cal_key, start, end, name)
@@ -430,15 +457,10 @@ class Scheduler:
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
                 else:
-                    makeup_search_starts = [WINDOWS["makeup"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
-                    best_slot = None
-                    for search_start in makeup_search_starts:
-                        best_slot = self._find_slot("makeup", mu_cal_key, search_start, group_key, model_busy, duration_min=mu_dur)
-                        if best_slot:
-                            break
-                    # Final fallback: ignore later/earlier hint and find ANY slot
-                    if not best_slot:
-                        best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
+                    mu_search_start = WINDOWS["makeup"][1] - timedelta(hours=3) if prefer_afternoon else day_start
+                    best_slot = self._find_slot_any_fit("makeup", mu_cal_key, mu_search_start, group_key, model_busy, mu_dur)
+                    if not best_slot and prefer_afternoon:
+                        best_slot = self._find_slot_any_fit("makeup", mu_cal_key, day_start, group_key, model_busy, mu_dur)
                     if best_slot:
                         start, end = best_slot
                         self._book("makeup", mu_cal_key, start, end, name)
