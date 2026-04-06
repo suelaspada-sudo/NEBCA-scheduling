@@ -115,7 +115,36 @@ def schedule_to_wix_csv(
     return csv_str
 
 
-def schedule_to_master_csv(schedule_rows: list[dict], output_path: str | None = None) -> str:
+def schedule_to_artist_csv(provider_schedules: list[dict], output_path: str | None = None) -> str:
+    """
+    Export per-artist schedule as CSV.
+    One row per appointment, grouped by artist, sorted by start time.
+    Columns: Artist, Service, Start Time, End Time, Model
+    """
+    if not provider_schedules:
+        return ""
+
+    output = io.StringIO()
+    fieldnames = ["Artist", "Service", "Start Time", "End Time", "Model"]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for provider in sorted(provider_schedules, key=lambda p: p["name"]):
+        for slot in provider["slots"]:
+            writer.writerow({
+                "Artist":     provider["name"],
+                "Service":    slot["service"].title(),
+                "Start Time": _fmt_time_wix(slot["start"]),
+                "End Time":   _fmt_time_wix(slot["end"]),
+                "Model":      "— BREAK —" if slot["is_break"] else slot["model"],
+            })
+
+    csv_str = output.getvalue()
+    if output_path:
+        with open(output_path, "w", newline="") as f:
+            f.write(csv_str)
+    return csv_str
+
     """
     Export the full master schedule (one row per model) as CSV.
     Useful for printing / sharing with the team.

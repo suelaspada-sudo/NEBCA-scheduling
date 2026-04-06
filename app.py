@@ -17,7 +17,7 @@ from src.parser import (
     parse_models_master, parse_contact_info, parse_services, merge_services,
 )
 from src.scheduler import Scheduler, schedule_to_rows, artist_capacity_report
-from src.exporter import schedule_to_wix_csv, schedule_to_master_csv
+from src.exporter import schedule_to_wix_csv, schedule_to_master_csv, schedule_to_artist_csv
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "nebca-r4h-2026-dev")
@@ -176,6 +176,21 @@ def export_wix():
         mimetype="text/csv",
         as_attachment=True,
         download_name="r4h_wix_schedule.csv",
+    )
+
+
+@app.route("/export/artists")
+def export_artists():
+    if not STATE["provider_schedules"]:
+        flash("Generate a schedule first.", "error")
+        return redirect(url_for("index"))
+
+    csv_str = schedule_to_artist_csv(STATE["provider_schedules"])
+    return send_file(
+        io.BytesIO(csv_str.encode()),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="r4h_artist_schedules.csv",
     )
 
 
