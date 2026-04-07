@@ -47,8 +47,8 @@ MASSAGE_SESSION_MIN = 10  # actual displayed appointment length (excludes buffer
 
 # Time-only tuples (hour, minute) — resolved to datetimes in Scheduler.__init__
 _WINDOW_TIMES = {
-    "hair":     ((11, 0), (17, 0)),    # 11 AM – 5 PM
-    "makeup":   ((11, 0), (17, 0)),    # 11 AM – 5 PM
+    "hair":     ((10, 0), (17, 0)),    # 10 AM – 5 PM
+    "makeup":   ((10, 0), (17, 0)),    # 10 AM – 5 PM
     "portrait": ((13, 30), (18, 0)),
     "massage":  ((9, 0),   (17, 0)),   # 9 AM – 5 PM
 }
@@ -321,7 +321,10 @@ class Scheduler:
             else None
         )
 
-        # Strict 11am–5pm window only — no early/late fallback.
+        # Artists with ≤3 assigned models start at 11am (no need to come in at 10am).
+        if service in ("hair", "makeup") and self._artist_model_count.get(cal.name, 0) <= 3:
+            win_start = max(win_start, _make_dt(self._event_date, 11, 0))
+
         start = max(earliest, win_start)
         while start + dur <= win_end:
             end = start + dur
@@ -663,11 +666,8 @@ class Scheduler:
             group_key = _group_key(model)
             # Rebuild model_busy from already-scheduled appointments
             model_busy = [(a["start"], a["end"]) for a in entry["appointments"].values()]
-            # Try full window from 11am, ignoring hint.
-            # Use extended end (5:30 PM) so models with group blackouts at 4–4:20
-            # can be placed at 4:20 even if they need 45 min (ends 5:05).
-            rescue_win_end = _make_dt(self._event_date, 17, 30)
-            slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur, win_end_override=rescue_win_end)
+            # Try full window from 10am, ignoring hint. Hard 5pm end.
+            slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
             if slot:
                 start, end = slot
                 self._book("makeup", mu_cal_key, start, end, entry["model"])
