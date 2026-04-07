@@ -683,6 +683,39 @@ class Scheduler:
                     if "no available makeup slot" not in w.lower()
                 ]
                 print(f"[RESCUED] {entry['model']}: makeup {fmt_time(start)}–{fmt_time(end)} with {provider_name}")
+                # If a portrait was already scheduled before this makeup slot, move it.
+                portrait_appt = entry["appointments"].get("portrait")
+                if portrait_appt and portrait_appt["start"] < end:
+                    old_p_start = portrait_appt["start"]
+                    old_p_end   = portrait_appt["end"]
+                    p_dur = int((old_p_end - old_p_start).total_seconds() // 60)
+                    # Unbook old portrait slot from the calendar
+                    old_pk = None
+                    for pk in (k for k in self.calendars if k.startswith("portrait::")):
+                        self.calendars[pk].slots = [
+                            s for s in self.calendars[pk].slots
+                            if not (s[0] == old_p_start and s[2] == entry["model"])
+                        ]
+                        if any(s[0] == old_p_start and s[2] == entry["model"] for s in self.calendars[pk].slots):
+                            old_pk = pk
+                    # Rebuild model_busy including the new makeup slot
+                    new_model_busy = [(a["start"], a["end"]) for a in entry["appointments"].values()]
+                    portrait_earliest = max(end, WINDOWS["portrait"][0])
+                    for pk in sorted(k for k in self.calendars if k.startswith("portrait::")):
+                        p_slot = self._find_slot("portrait", pk, portrait_earliest, group_key, new_model_busy,
+                                                 duration_min=p_dur, win_end_override=_make_dt(self._event_date, 19, 0))
+                        if p_slot:
+                            ps, pe = p_slot
+                            self._book("portrait", pk, ps, pe, entry["model"])
+                            entry["appointments"]["portrait"] = {
+                                "provider": self.calendars[pk].name,
+                                "start": ps,
+                                "end": pe,
+                            }
+                            print(f"[RESCUED] {entry['model']}: portrait moved to {fmt_time(ps)}–{fmt_time(pe)}")
+                            break
+                    else:
+                        print(f"[RESCUE WARN] {entry['model']}: could not reschedule portrait after makeup")
             else:
                 print(f"[RESCUE FAILED] {entry['model']}: still no makeup slot available with {assigned_mu}")
 
