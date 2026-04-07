@@ -268,8 +268,8 @@ def parse_models_master(path: str | Path) -> list[dict]:
             # pre-assigned glam — if filled in, skip matching for this model
             "assigned_hair_stylist": _safe_str(row.get("Hair Stylist Name", "")),
             "assigned_makeup_artist": _safe_str(row.get("Makeup Artist Name", "")),
-            "hair_time_slot": _safe_str(row.get("Time Slot", "")),
-            "makeup_time_slot": _safe_str(row.get("Time Slot.1", "")),
+            "hair_time_slot": _safe_str(row.get("Time Slot", "") or row.get("Time", "")),
+            "makeup_time_slot": _safe_str(row.get("Time Slot.1", "") or row.get("Time.1", "")),
             "hair_notes": notes,
             "makeup_notes": _safe_str(row.get("Notes.1", "")),
             "scheduling_hint": scheduling_hint,
