@@ -685,6 +685,13 @@ class Scheduler:
                     print(f"  → {mu_cal_key} has {len(booked_slots)} appts, {total_min} min booked:")
                     for s, e, m in sorted(booked_slots):
                         print(f"      {fmt_time(s)}–{fmt_time(e)}  {m}")
+                print(f"  → {entry['model']} model_busy:")
+                for ms, me in sorted(model_busy):
+                    print(f"      {fmt_time(ms)}–{fmt_time(me)}")
+                if group_key:
+                    bo = REHEARSAL_BLACKOUTS.get(group_key)
+                    if bo:
+                        print(f"  → blackout: {fmt_time(bo[0])}–{fmt_time(bo[1])}")
 
     def run(self) -> list[dict]:
         """
