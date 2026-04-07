@@ -47,8 +47,8 @@ MASSAGE_SESSION_MIN = 10  # actual displayed appointment length (excludes buffer
 
 # Time-only tuples (hour, minute) — resolved to datetimes in Scheduler.__init__
 _WINDOW_TIMES = {
-    "hair":     ((10, 0), (17, 0)),    # 10 AM – 5 PM
-    "makeup":   ((10, 0), (17, 0)),    # 10 AM – 5 PM
+    "hair":     ((10, 0), (16, 30)),    # 10 AM – 4:30 PM
+    "makeup":   ((10, 0), (16, 30)),    # 10 AM – 4:30 PM
     "portrait": ((13, 30), (18, 0)),
     "massage":  ((9, 0),   (17, 0)),   # 9 AM – 5 PM
 }
@@ -560,7 +560,7 @@ class Scheduler:
         """
         _break_dur = timedelta(minutes=30)
         _break_win_start = _make_dt(self._event_date, 12, 0)
-        _break_win_end   = WINDOWS["hair"][1]   # 5:00 PM
+        _break_win_end   = WINDOWS["hair"][1]   # 4:30 PM
         _portrait_break  = _make_dt(self._event_date, 14, 30)
         _massage_break   = _make_dt(self._event_date, 12, 30)
 
