@@ -102,6 +102,7 @@ def _safe_str(val) -> str:
 GROUP_ROW_PATTERNS = [
     ("group1",           ["group 1", "group1", "runway part 1", "runway part1", "act 1", "act1"]),
     ("group2",           ["group 2", "group2", "runway part 2", "runway part2", "act 2", "act2"]),
+    ("group3",           ["group 3", "group3", "runway part 3", "runway part3", "act 3", "act3"]),
     ("hope_ambassador",  ["hope ambassador", "hope ambassadors", "hope amb"]),
     ("board_member",     ["board member", "board members", "bad", "bad members"]),
 ]
@@ -226,6 +227,8 @@ def parse_models_master(path: str | Path) -> list[dict]:
                 group = "group1"
             elif act_lower in ("2", "act 2", "act2", "group 2", "group2"):
                 group = "group2"
+            elif act_lower in ("3", "act 3", "act3", "group 3", "group3"):
+                group = "group3"
             elif act_lower in ("hope ambassador", "hope ambassadors", "hope amb", "ha"):
                 group = "hope_ambassador"
             elif act_lower in ("board member", "board members", "bad", "bad member", "bad members"):

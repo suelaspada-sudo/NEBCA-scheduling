@@ -382,6 +382,8 @@ class Scheduler:
                 warnings.append(msg[7:])
             else:
                 hair_dur = _parse_duration_min(model.get("hair_time_slot", ""))
+                if hair_dur is None:
+                    print(f"[WARN] {name}: hair time slot missing/unparseable — using {DURATIONS['hair']}min default")
                 # "later" note → try afternoon first, then fall back to morning
                 # Everyone else → fill from 11am in order, no gaps
                 # Prefer afternoon if Notes say "later", but always fall back to day_start
@@ -423,6 +425,8 @@ class Scheduler:
                 warnings.append(msg[7:])
             else:
                 mu_dur = _parse_duration_min(model.get("makeup_time_slot", ""))
+                if mu_dur is None:
+                    print(f"[WARN] {name}: makeup time slot missing/unparseable — using {DURATIONS['makeup']}min default")
                 if same_artist and hair_end > day_start:
                     # Same artist — makeup starts immediately after hair, no gap
                     start = hair_end
@@ -432,11 +436,21 @@ class Scheduler:
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
                 else:
-                    # Always search makeup from 11am regardless of scheduling hint.
-                    # Afternoon preference for makeup causes group1 models to claim
-                    # the 4pm–5pm window, which is the only slot available for group2
-                    # models (who must wait until after their 1–2pm blackout).
-                    best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
+                    # Respect later/earlier scheduling hint for makeup, but cap
+                    # the afternoon search at 4pm so group1 models don't grab the
+                    # only slot group2 models can use (post-blackout window).
+                    _4pm = WINDOWS["makeup"][1] - timedelta(hours=1)  # 4:00 PM
+                    if prefer_afternoon:
+                        # Try 2pm–4pm first; if that slot falls at or after 4pm,
+                        # fall back to full 11am–5pm search to avoid blocking others.
+                        _2pm = _make_dt(self._event_date, 14, 0)
+                        afternoon_slot = self._find_slot("makeup", mu_cal_key, _2pm, group_key, model_busy, duration_min=mu_dur)
+                        if afternoon_slot and afternoon_slot[0] < _4pm:
+                            best_slot = afternoon_slot
+                        else:
+                            best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
+                    else:
+                        best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
                     if best_slot:
                         start, end = best_slot
                         self._book("makeup", mu_cal_key, start, end, name)
@@ -588,27 +602,32 @@ class Scheduler:
                 key=lambda x: x[0]
             )
 
+            # Use actual booked appointment count (not pre-assigned model count)
+            if len(booked) <= 3:
+                continue
+
             if override_start is not None:
                 b_start = override_start
-                # Only use override if there's an appointment after the break
+                # Only use override if there's an appointment after the break end
                 break_end = b_start + _break_dur
                 has_appt_after = any(s >= break_end for s, e in booked)
                 if not has_appt_after:
-                    # Override would land at end of day — fall through to gap search
-                    override_start = None
+                    override_start = None  # fall through to gap search
 
             if override_start is None:
-                b_start = _break_win_start
-                gap_found = False
-                for s, e in booked:
-                    if b_start + _break_dur <= s:
-                        # Gap found AND there is an appointment after it (s is that appointment)
-                        gap_found = True
+                # Find the first gap between two consecutive appointments after 12pm.
+                # Any gap size works — we just need a slot between two appointments
+                # (not at the end of the day).
+                b_start = None
+                for i in range(1, len(booked)):
+                    prev_end = booked[i - 1][1]
+                    next_start = booked[i][0]
+                    gap_start = max(prev_end, _break_win_start)
+                    if gap_start < next_start:  # any gap, even < 30 min, counts
+                        b_start = gap_start
                         break
-                    if e > b_start:
-                        b_start = e
-                if not gap_found:
-                    continue  # no mid-day gap — skip break for this artist
+                if b_start is None:
+                    continue  # no gap between any two appointments — skip break
 
             if b_start + _break_dur <= _break_win_end:
                 # Book the break on every calendar belonging to this artist
