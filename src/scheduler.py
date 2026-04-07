@@ -54,9 +54,10 @@ _WINDOW_TIMES = {
 }
 
 _BLACKOUT_TIMES = {
-    "group1":           ((15, 0), (16, 0)),   # Rehearsal 2: 3 PM – 4 PM
-    "group2":           ((13, 0), (14, 0)),   # Rehearsal 1: 1 PM – 2 PM
-    "hope_ambassador":  ((13, 0), (14, 0)),   # same as group2
+    "group1":           ((15, 0), (16, 0)),   # Rehearsal: 3 PM – 4 PM
+    "group2":           ((13, 0), (14, 0)),   # Rehearsal: 1 PM – 2 PM
+    "group3":           ((16, 0), (16, 20)),  # Rehearsal: 4 PM – 4:20 PM
+    "hope_ambassador":  ((13, 0), (14, 0)),   # Rehearsal: 1 PM – 2 PM (own entry, not group2)
     # board_member: no blackout
 }
 
@@ -106,6 +107,7 @@ def _parse_duration_min(ts: str) -> int | None:
 GROUP_LABELS = {
     "group1":          ["group 1", "group1", "1", "act 1", "act1"],
     "group2":          ["group 2", "group2", "2", "act 2", "act2"],
+    "group3":          ["group 3", "group3", "3", "act 3", "act3"],
     "hope_ambassador": ["hope ambassador", "hope ambassadors", "ha", "hope amb"],
     "board_member":    ["board member", "board members", "board", "bad", "bad member", "bad members"],
 }
@@ -580,19 +582,33 @@ class Scheduler:
                     override_start = override_dt
                     break
 
+            # Collect model-only slots (exclude breaks) sorted by start time
+            booked = sorted(
+                set((s, e) for k in all_keys for s, e, m in self.calendars[k].slots if m != "__break__"),
+                key=lambda x: x[0]
+            )
+
             if override_start is not None:
                 b_start = override_start
-            else:
-                booked = sorted(
-                    set((s, e) for k in all_keys for s, e, _ in self.calendars[k].slots),
-                    key=lambda x: x[0]
-                )
+                # Only use override if there's an appointment after the break
+                break_end = b_start + _break_dur
+                has_appt_after = any(s >= break_end for s, e in booked)
+                if not has_appt_after:
+                    # Override would land at end of day — fall through to gap search
+                    override_start = None
+
+            if override_start is None:
                 b_start = _break_win_start
+                gap_found = False
                 for s, e in booked:
                     if b_start + _break_dur <= s:
-                        break   # gap found before this slot
+                        # Gap found AND there is an appointment after it (s is that appointment)
+                        gap_found = True
+                        break
                     if e > b_start:
-                        b_start = e  # push past this slot
+                        b_start = e
+                if not gap_found:
+                    continue  # no mid-day gap — skip break for this artist
 
             if b_start + _break_dur <= _break_win_end:
                 # Book the break on every calendar belonging to this artist
@@ -611,7 +627,7 @@ class Scheduler:
             idx, model = indexed_model
             gk = _group_key(model)
             # group1 and group2 have rehearsal blackouts → schedule first
-            if gk in ("group1", "group2", "hope_ambassador"):
+            if gk in ("group1", "group2", "group3", "hope_ambassador"):
                 return 0
             # board members have no blackout → most flexible, schedule last
             if gk == "board_member":
