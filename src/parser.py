@@ -245,11 +245,13 @@ def parse_models_master(path: str | Path) -> list[dict]:
         wants_makeup = not (makeup_val in ("no", "maybe") or makeup_val.startswith("no") or makeup_val.startswith("maybe"))
 
         # Parse Notes for scheduling hint ("later" → prefer afternoon, "earlier" → prefer morning)
+        # Check both hair notes (Notes) and makeup notes (Notes.1)
         notes = _safe_str(row.get("Notes", ""))
-        notes_lower = notes.lower()
-        if "later" in notes_lower:
+        makeup_notes = _safe_str(row.get("Notes.1", ""))
+        combined_notes = f"{notes} {makeup_notes}".lower()
+        if "later" in combined_notes:
             scheduling_hint = "later"
-        elif "earlier" in notes_lower:
+        elif "earlier" in combined_notes:
             scheduling_hint = "earlier"
         else:
             scheduling_hint = ""
