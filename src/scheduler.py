@@ -634,6 +634,51 @@ class Scheduler:
                 for k in all_keys:
                     self.calendars[k].book(b_start, b_start + _break_dur, "__break__")
 
+    def _rescue_unscheduled_makeup(self):
+        """
+        Second pass: find makeup slots for any model that missed one in the main pass.
+        Ignores later/earlier scheduling hint — uses full window from day_start.
+        Does NOT move any already-booked appointments.
+        """
+        day_start = WINDOWS["makeup"][0]
+        for entry in self.schedule:
+            if "makeup" in entry.get("appointments", {}):
+                continue
+            model = next((m for m in self.models if m["name"] == entry["model"]), None)
+            if not model:
+                continue
+            assigned_mu = model.get("assigned_makeup_artist", "").strip()
+            if not assigned_mu:
+                continue
+            if not model.get("wants_makeup", True):
+                continue
+            mu_cal_key = self._resolve_calendar_key("makeup", assigned_mu)
+            if not mu_cal_key:
+                continue
+            mu_dur = _parse_duration_min(model.get("makeup_time_slot", "")) or DURATIONS["makeup"]
+            group_key = _group_key(model)
+            # Rebuild model_busy from already-scheduled appointments
+            model_busy = [(a["start"], a["end"]) for a in entry["appointments"].values()]
+            # Try full window from 11am, ignoring hint
+            slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
+            if slot:
+                start, end = slot
+                self._book("makeup", mu_cal_key, start, end, entry["model"])
+                provider_name = mu_cal_key[mu_cal_key.index("::") + 2:]
+                entry["appointments"]["makeup"] = {
+                    "provider": provider_name,
+                    "start": start,
+                    "end": end,
+                }
+                # Remove the "no available makeup slot" warning if present
+                entry["warnings"] = [
+                    w for w in entry.get("warnings", [])
+                    if "no available makeup slot" not in w.lower()
+                ]
+                print(f"[RESCUED] {entry['model']}: makeup {fmt_time(start)}–{fmt_time(end)} with {provider_name}")
+            else:
+                print(f"[RESCUE FAILED] {entry['model']}: still no makeup slot available")
+
     def run(self) -> list[dict]:
         """
         Schedule all models.
@@ -648,9 +693,9 @@ class Scheduler:
             # group1 and group2 have rehearsal blackouts → schedule first
             if gk in ("group1", "group2", "group3", "hope_ambassador"):
                 return 0
-            # board members have no blackout → most flexible, schedule last
+            # board members have no blackout but still schedule before ungrouped
             if gk == "board_member":
-                return 2
+                return 1
             return 1
 
         indexed = list(enumerate(self.models))
@@ -660,6 +705,9 @@ class Scheduler:
         # Restore original sheet order for display
         order = {m["name"]: i for i, m in enumerate(self.models)}
         self.schedule.sort(key=lambda r: order.get(r["model"], 9999))
+
+        # Second pass: rescue any models that missed makeup in the main pass
+        self._rescue_unscheduled_makeup()
 
         self._book_breaks()
         return self.schedule
