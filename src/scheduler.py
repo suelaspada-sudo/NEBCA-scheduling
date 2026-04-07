@@ -296,13 +296,17 @@ class Scheduler:
         group_key: str | None,
         model_busy: list[tuple[datetime, datetime]],
         duration_min: int | None = None,
+        win_end_override: datetime | None = None,
     ) -> tuple[datetime, datetime] | None:
         """
         Find the earliest slot >= earliest that is free for both the provider
         and the model, outside any blackout window, within the service window.
         duration_min overrides the global DURATIONS default when provided.
+        win_end_override allows the rescue pass to extend past the normal 5pm cap.
         """
         win_start, win_end = WINDOWS[service]
+        if win_end_override is not None:
+            win_end = win_end_override
         dur = timedelta(minutes=duration_min if duration_min is not None else DURATIONS[service])
         cal = self.calendars.get(provider_key)
         if not cal:
@@ -659,8 +663,11 @@ class Scheduler:
             group_key = _group_key(model)
             # Rebuild model_busy from already-scheduled appointments
             model_busy = [(a["start"], a["end"]) for a in entry["appointments"].values()]
-            # Try full window from 11am, ignoring hint
-            slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
+            # Try full window from 11am, ignoring hint.
+            # Use extended end (5:30 PM) so models with group blackouts at 4–4:20
+            # can be placed at 4:20 even if they need 45 min (ends 5:05).
+            rescue_win_end = _make_dt(self._event_date, 17, 30)
+            slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur, win_end_override=rescue_win_end)
             if slot:
                 start, end = slot
                 self._book("makeup", mu_cal_key, start, end, entry["model"])
