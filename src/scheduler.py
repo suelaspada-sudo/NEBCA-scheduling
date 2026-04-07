@@ -56,7 +56,7 @@ _WINDOW_TIMES = {
 _BLACKOUT_TIMES = {
     "group1":           ((13, 0), (14, 0)),   # Rehearsal: 1 PM – 2 PM
     "group2":           ((15, 0), (16, 0)),   # Rehearsal: 3 PM – 4 PM
-    "group3":           ((16, 0), (16, 20)),  # Rehearsal: 4 PM – 4:20 PM
+    "group3":           ((14, 0), (14, 20)),  # Rehearsal: 2 PM – 2:20 PM
     "hope_ambassador":  ((13, 0), (14, 0)),   # Rehearsal: 1 PM – 2 PM (own entry, not group2)
     # board_member: no blackout
 }
