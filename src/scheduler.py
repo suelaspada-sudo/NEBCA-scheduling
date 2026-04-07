@@ -678,6 +678,13 @@ class Scheduler:
                 print(f"[RESCUED] {entry['model']}: makeup {fmt_time(start)}–{fmt_time(end)} with {provider_name}")
             else:
                 print(f"[RESCUE FAILED] {entry['model']}: still no makeup slot available")
+                cal = self.calendars.get(mu_cal_key)
+                if cal:
+                    booked_slots = [(s, e, m) for s, e, m in cal.slots if m != "__break__"]
+                    total_min = sum(int((e - s).total_seconds() // 60) for s, e, _ in booked_slots)
+                    print(f"  → {mu_cal_key} has {len(booked_slots)} appts, {total_min} min booked:")
+                    for s, e, m in sorted(booked_slots):
+                        print(f"      {fmt_time(s)}–{fmt_time(e)}  {m}")
 
     def run(self) -> list[dict]:
         """
