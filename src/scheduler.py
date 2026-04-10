@@ -466,20 +466,27 @@ class Scheduler:
                     appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
                     makeup_end = end
                 else:
+                    # For models with few appointments, pack makeup right after hair.
+                    # Start search from hair_end so slots land back-to-back.
+                    # Fall back to day_start only if no slot found from hair_end.
+                    makeup_earliest = hair_end if hair_end > day_start else day_start
+
                     # Respect later/earlier scheduling hint for makeup, but cap
                     # the afternoon search at 4pm so group1 models don't grab the
                     # only slot group2 models can use (post-blackout window).
                     _4pm = WINDOWS["makeup"][1] - timedelta(hours=1)  # 4:00 PM
                     if prefer_afternoon:
-                        # Try 2pm–4pm first; if that slot falls at or after 4pm,
-                        # fall back to full window search to avoid blocking others.
+                        # Try afternoon first (from max of hair_end and 2pm).
                         _2pm = _make_dt(self._event_date, 14, 0)
-                        afternoon_slot = self._find_slot("makeup", mu_cal_key, _2pm, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                        afternoon_slot = self._find_slot("makeup", mu_cal_key, max(makeup_earliest, _2pm), group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                         if afternoon_slot and afternoon_slot[0] < _4pm:
                             best_slot = afternoon_slot
                         else:
-                            best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                            best_slot = self._find_slot("makeup", mu_cal_key, makeup_earliest, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                     else:
+                        best_slot = self._find_slot("makeup", mu_cal_key, makeup_earliest, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                    # If packing after hair didn't work, try anywhere in the day
+                    if not best_slot and makeup_earliest > day_start:
                         best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                     if best_slot:
                         start, end = best_slot
