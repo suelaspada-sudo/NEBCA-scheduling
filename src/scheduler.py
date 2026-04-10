@@ -70,6 +70,12 @@ _LATER_HAIR_MODELS = {
     "kristen hall",
 }
 
+# Per-model availability windows: (earliest_hour, earliest_min), (latest_hour, latest_min)
+# All appointments for these models must fall within this window.
+_MODEL_AVAILABILITY_TIMES: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {
+    "jaime gagnon": ((11, 0), (14, 30)),
+}
+
 
 def _make_dt(date_str: str, h: int, m: int) -> datetime:
     return datetime.strptime(f"{date_str} {h:02d}:{m:02d}", "%Y-%m-%d %H:%M")
@@ -377,7 +383,15 @@ class Scheduler:
         appointments = {}
         model_busy: list[tuple[datetime, datetime]] = []
 
-        day_start = WINDOWS["hair"][0]  # 11:00 AM
+        day_start = WINDOWS["hair"][0]  # 10:00 AM
+
+        # Per-model availability override (e.g. "only available 11am–2:30pm")
+        _avail = _MODEL_AVAILABILITY_TIMES.get(name.lower().strip())
+        if _avail:
+            day_start = max(day_start, _make_dt(self._event_date, *_avail[0]))
+            model_win_end = _make_dt(self._event_date, *_avail[1])
+        else:
+            model_win_end = None  # use service default
 
         # Scheduling hint from Notes field ("later" / "earlier")
         scheduling_hint = model.get("scheduling_hint", "")
@@ -406,12 +420,12 @@ class Scheduler:
                 hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
                 best_slot = None
                 for search_start in hair_search_starts:
-                    best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur)
+                    best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur, win_end_override=model_win_end)
                     if best_slot:
                         break
                 # Fallback: ignore later/earlier hint and try full window
                 if not best_slot:
-                    best_slot = self._find_slot("hair", hair_cal_key, day_start, group_key, model_busy, duration_min=hair_dur)
+                    best_slot = self._find_slot("hair", hair_cal_key, day_start, group_key, model_busy, duration_min=hair_dur, win_end_override=model_win_end)
                 if best_slot:
                     start, end = best_slot
                     self._book("hair", hair_cal_key, start, end, name)
@@ -458,15 +472,15 @@ class Scheduler:
                     _4pm = WINDOWS["makeup"][1] - timedelta(hours=1)  # 4:00 PM
                     if prefer_afternoon:
                         # Try 2pm–4pm first; if that slot falls at or after 4pm,
-                        # fall back to full 11am–5pm search to avoid blocking others.
+                        # fall back to full window search to avoid blocking others.
                         _2pm = _make_dt(self._event_date, 14, 0)
-                        afternoon_slot = self._find_slot("makeup", mu_cal_key, _2pm, group_key, model_busy, duration_min=mu_dur)
+                        afternoon_slot = self._find_slot("makeup", mu_cal_key, _2pm, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                         if afternoon_slot and afternoon_slot[0] < _4pm:
                             best_slot = afternoon_slot
                         else:
-                            best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
+                            best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                     else:
-                        best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
+                        best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                     if best_slot:
                         start, end = best_slot
                         self._book("makeup", mu_cal_key, start, end, name)
