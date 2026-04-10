@@ -61,6 +61,15 @@ _BLACKOUT_TIMES = {
     # board_member: no blackout
 }
 
+# Models who wear wigs — schedule their hair appointment later in the day.
+_LATER_HAIR_MODELS = {
+    "brooke myshrall",
+    "alison willette",
+    "jodi peterson",
+    "michelle neas",
+    "kristen hall",
+}
+
 
 def _make_dt(date_str: str, h: int, m: int) -> datetime:
     return datetime.strptime(f"{date_str} {h:02d}:{m:02d}", "%Y-%m-%d %H:%M")
@@ -372,7 +381,7 @@ class Scheduler:
 
         # Scheduling hint from Notes field ("later" / "earlier")
         scheduling_hint = model.get("scheduling_hint", "")
-        prefer_afternoon = (scheduling_hint == "later")
+        prefer_afternoon = (scheduling_hint == "later") or (name.lower().strip() in _LATER_HAIR_MODELS)
 
         warnings: list[str] = []
 
