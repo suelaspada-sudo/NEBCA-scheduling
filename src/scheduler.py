@@ -265,6 +265,24 @@ class Scheduler:
 
         self._artist_model_count = {k: len(v) for k, v in artist_model_count.items()}
 
+        # Map canonical artist name → set of group keys among their assigned models.
+        # Used to decide whether a group2 model should prefer the 1pm "dead zone".
+        _ag: dict[str, set[str]] = {}
+        for model in self.models:
+            gk = _group_key(model)
+            if not gk:
+                continue
+            for field, svc in [("assigned_hair_stylist", "hair"), ("assigned_makeup_artist", "makeup")]:
+                raw = model.get(field, "").strip()
+                if not raw:
+                    continue
+                ck = self._resolve_calendar_key(svc, raw)
+                if not ck:
+                    continue
+                aname = ck[len(svc) + 2:]
+                _ag.setdefault(aname, set()).add(gk)
+        self._artist_groups: dict[str, set[str]] = _ag
+
         self.schedule: list[dict] = []
 
     def _booking_count(self, artist_name: str) -> int:
@@ -517,9 +535,18 @@ class Scheduler:
                 if hair_dur is None:
                     print(f"[WARN] {name}: hair time slot missing/unparseable — using {DURATIONS['hair']}min default")
                 # "later" note → try afternoon first, then fall back to morning
-                # Everyone else → fill from 11am in order, no gaps
-                # Prefer afternoon if Notes say "later", but always fall back to day_start
-                hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start] if hair_prefer_afternoon else [day_start]
+                # group2 on mixed artists → try 1pm first (fills the group1 dead zone,
+                #   leaves morning open for group1 models that can't use 1–2pm)
+                # Everyone else → fill from day_start
+                _hair_aname = hair_cal_key[len("hair::"):]
+                _hair_artist_has_group1 = "group1" in self._artist_groups.get(_hair_aname, set())
+                _1pm = _make_dt(self._event_date, 13, 0)
+                if hair_prefer_afternoon:
+                    hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start]
+                elif group_key == "group2" and _hair_artist_has_group1 and day_start < _1pm:
+                    hair_search_starts = [_1pm, day_start]
+                else:
+                    hair_search_starts = [day_start]
                 best_slot = None
                 for search_start in hair_search_starts:
                     best_slot = self._find_slot("hair", hair_cal_key, search_start, blackout_key, model_busy, duration_min=hair_dur, win_end_override=model_win_end)
@@ -590,6 +617,8 @@ class Scheduler:
                         # the afternoon search at 4pm so group1 models don't grab the
                         # only slot group2 models can use (post-blackout window).
                         _4pm = WINDOWS["makeup"][1] - timedelta(hours=1)  # 4:00 PM
+                        _mu_aname = mu_cal_key[len("makeup::"):]
+                        _mu_artist_has_group1 = "group1" in self._artist_groups.get(_mu_aname, set())
                         if mu_prefer_afternoon:
                             # Try afternoon first (from max of hair_end and 2pm).
                             _2pm = _make_dt(self._event_date, 14, 0)
@@ -598,6 +627,11 @@ class Scheduler:
                                 best_slot = afternoon_slot
                             else:
                                 best_slot = self._find_slot("makeup", mu_cal_key, makeup_earliest, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                        elif group_key == "group2" and _mu_artist_has_group1 and makeup_earliest < _1pm:
+                            # group2 on a mixed artist: prefer 1pm (fills the group1
+                            # dead zone, keeps morning open for group1 models).
+                            slot_1pm = self._find_slot("makeup", mu_cal_key, _1pm, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                            best_slot = slot_1pm or self._find_slot("makeup", mu_cal_key, makeup_earliest, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                         else:
                             best_slot = self._find_slot("makeup", mu_cal_key, makeup_earliest, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                         # If packing after hair didn't work, try anywhere in the day
