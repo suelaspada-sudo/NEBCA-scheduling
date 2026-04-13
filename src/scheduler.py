@@ -47,8 +47,8 @@ MASSAGE_SESSION_MIN = 10  # actual displayed appointment length (excludes buffer
 
 # Time-only tuples (hour, minute) — resolved to datetimes in Scheduler.__init__
 _WINDOW_TIMES = {
-    "hair":     ((10, 0), (16, 30)),    # 10 AM – 4:30 PM
-    "makeup":   ((10, 0), (16, 30)),    # 10 AM – 4:30 PM
+    "hair":     ((10, 0), (16, 0)),    # 10 AM – 4 PM
+    "makeup":   ((10, 0), (16, 0)),    # 10 AM – 4 PM
     "portrait": ((13, 30), (18, 0)),
     "massage":  ((9, 0),   (17, 0)),   # 9 AM – 5 PM
 }
@@ -492,10 +492,13 @@ class Scheduler:
         _COMPACT_THRESHOLD = 4
         assigned_hair = model.get("assigned_hair_stylist", "").strip()
         assigned_mu   = model.get("assigned_makeup_artist", "").strip()
-        _hair_artist_light = self._artist_model_count.get(assigned_hair, 0) <= _COMPACT_THRESHOLD
-        _mu_artist_light   = self._artist_model_count.get(assigned_mu,   0) <= _COMPACT_THRESHOLD
-        hair_prefer_afternoon  = prefer_afternoon and not _hair_artist_light
-        mu_prefer_afternoon    = prefer_afternoon and not _mu_artist_light
+        _mu_artist_light = self._artist_model_count.get(assigned_mu, 0) <= _COMPACT_THRESHOLD
+        # Hair "later" preference: ONLY for explicit wig models (_LATER_HAIR_MODELS).
+        # Notes-based "later" hints are intentionally excluded from hair — allowing
+        # them pushed hair into the afternoon and left artists with 4-hour idle gaps.
+        hair_prefer_afternoon = _name_lower in _LATER_HAIR_MODELS
+        # Makeup "later" preference: from notes, but suppressed for sparse artists.
+        mu_prefer_afternoon   = prefer_afternoon and not _mu_artist_light
 
         warnings: list[str] = []
 
