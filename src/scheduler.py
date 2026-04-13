@@ -750,26 +750,32 @@ class Scheduler:
 
             if override_start is not None:
                 b_start = override_start
-                # Only use override if there's an appointment after the break end
                 break_end = b_start + _break_dur
+                # Only use override if: break doesn't overlap any appointment
+                # AND at least one appointment comes after the break ends
+                conflicts    = any(s < break_end and e > b_start for s, e in booked)
                 has_appt_after = any(s >= break_end for s, e in booked)
-                if not has_appt_after:
+                if conflicts or not has_appt_after:
                     override_start = None  # fall through to gap search
 
             if override_start is None:
-                # Find the first gap between two consecutive appointments after 12pm.
-                # Any gap size works — we just need a slot between two appointments
-                # (not at the end of the day).
-                b_start = None
+                # Collect ALL gaps between consecutive appointments where the full
+                # 30-min break fits (gap must be ≥ 30 min wide, starting after 12pm).
+                qualifying_gaps = []
                 for i in range(1, len(booked)):
-                    prev_end = booked[i - 1][1]
+                    prev_end   = booked[i - 1][1]
                     next_start = booked[i][0]
-                    gap_start = max(prev_end, _break_win_start)
-                    if gap_start < next_start:  # any gap, even < 30 min, counts
-                        b_start = gap_start
-                        break
-                if b_start is None:
-                    continue  # no gap between any two appointments — skip break
+                    gap_start  = max(prev_end, _break_win_start)
+                    if gap_start + _break_dur <= next_start:
+                        qualifying_gaps.append(gap_start)
+
+                if not qualifying_gaps:
+                    continue  # no gap wide enough for a full break — skip
+
+                # Pick the gap closest to the midpoint of the artist's working day
+                # so the break doesn't land right after the very first appointment.
+                day_mid = booked[0][0] + (booked[-1][1] - booked[0][0]) / 2
+                b_start = min(qualifying_gaps, key=lambda g: abs(g - day_mid))
 
             if b_start + _break_dur <= _break_win_end:
                 # Book the break on every calendar belonging to this artist
