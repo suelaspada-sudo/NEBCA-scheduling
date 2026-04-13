@@ -560,13 +560,20 @@ class Scheduler:
                 if mu_dur is None:
                     print(f"[WARN] {name}: makeup time slot missing/unparseable — using {DURATIONS['makeup']}min default")
                 if same_artist and hair_end > day_start:
-                    # Same artist — makeup starts immediately after hair, no gap
-                    start = hair_end
-                    end = start + timedelta(minutes=mu_dur if mu_dur else DURATIONS["makeup"])
-                    self._book("makeup", mu_cal_key, start, end, name)
-                    model_busy.append((start, end))
-                    appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
-                    makeup_end = end
+                    # Same artist does both hair and makeup — find the next available
+                    # slot starting from hair_end, respecting any pre-booked breaks.
+                    best_slot = self._find_slot("makeup", mu_cal_key, hair_end, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                    if best_slot:
+                        start, end = best_slot
+                        self._book("makeup", mu_cal_key, start, end, name)
+                        model_busy.append((start, end))
+                        appointments["makeup"] = {"provider": mu_cal_key[len("makeup::"):], "start": start, "end": end}
+                        makeup_end = end
+                    else:
+                        artist_name = mu_cal_key[len("makeup::"):]
+                        msg = f"[WARN] {name}: no available makeup slot with {artist_name} (artist fully booked)"
+                        print(msg)
+                        warnings.append(msg[7:])
                 else:
                     # For models with few appointments, pack makeup right after hair.
                     # Start search from hair_end so slots land back-to-back.
