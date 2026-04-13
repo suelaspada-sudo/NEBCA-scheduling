@@ -536,7 +536,7 @@ class Scheduler:
                     hair_end = end
                 else:
                     artist_name = hair_cal_key[len("hair::"):]
-                    msg = f"[WARN] {name}: no available hair slot with {artist_name} (artist fully booked 11am-5pm)"
+                    msg = f"[WARN] {name}: no available hair slot with {artist_name} (artist fully booked 10am-4pm)"
                     print(msg)
                     warnings.append(msg[7:])
 
@@ -611,7 +611,7 @@ class Scheduler:
                         makeup_end = end
                     else:
                         artist_name = mu_cal_key[len("makeup::"):]
-                        msg = f"[WARN] {name}: no available makeup slot with {artist_name} (artist fully booked 11am-5pm)"
+                        msg = f"[WARN] {name}: no available makeup slot with {artist_name} (artist fully booked 10am-4pm)"
                         print(msg)
                         warnings.append(msg[7:])
 
@@ -799,8 +799,13 @@ class Scheduler:
             group_key = _group_key(model)
             # Rebuild model_busy from already-scheduled appointments
             model_busy = [(a["start"], a["end"]) for a in entry["appointments"].values()]
-            # Try full window from 10am, ignoring hint. Hard 5pm end.
+            # Try full window from 10am, ignoring hint.
             slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
+            # Last resort: extend window to 4:30pm if the normal 4pm window is full.
+            if not slot:
+                _430pm = _make_dt(self._event_date, 16, 30)
+                slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy,
+                                       duration_min=mu_dur, win_end_override=_430pm)
             if slot:
                 start, end = slot
                 self._book("makeup", mu_cal_key, start, end, entry["model"])
@@ -863,13 +868,23 @@ class Scheduler:
         def scheduling_priority(indexed_model):
             idx, model = indexed_model
             gk = _group_key(model)
-            # group1 and group2 have rehearsal blackouts → schedule first
-            if gk in ("group1", "group2", "group3", "hope_ambassador"):
+            # Schedule most time-constrained groups first so they claim their
+            # only viable slots before less-constrained models grab them.
+            # group2 (3–4 PM rehearsal): can only get makeup 10am–3pm → most constrained
+            # group1 (1–2 PM rehearsal): 10am–1pm or 2pm–4pm → also constrained
+            # group3 (2–2:20 PM rehearsal): very short blackout, slightly more flexible
+            # hope_ambassador, board_member: schedule before ungrouped
+            if gk == "group2":
                 return 0
-            # board members have no blackout but still schedule before ungrouped
-            if gk == "board_member":
+            if gk == "group1":
                 return 1
-            return 1
+            if gk == "group3":
+                return 2
+            if gk == "hope_ambassador":
+                return 3
+            if gk == "board_member":
+                return 4
+            return 5
 
         indexed = list(enumerate(self.models))
         for _, model in sorted(indexed, key=scheduling_priority):
