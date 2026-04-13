@@ -58,6 +58,7 @@ _BLACKOUT_TIMES = {
     "group2":           ((15, 0), (16, 0)),   # Rehearsal: 3 PM – 4 PM
     "group3":           ((14, 0), (14, 20)),  # Rehearsal: 2 PM – 2:20 PM
     "hope_ambassador":  ((13, 0), (14, 0)),   # Rehearsal: 1 PM – 2 PM (own entry, not group2)
+    "all_rehearsals":   ((13, 0), (16, 0)),   # All 3 rehearsals combined: 1 PM – 4 PM
     # board_member: no blackout
 }
 
@@ -68,6 +69,17 @@ _LATER_HAIR_MODELS = {
     "jodi peterson",
     "michelle neas",
     "kristen hall",
+    "cassia leach",
+}
+
+# Models attending multiple rehearsals — use a custom combined blackout key.
+_MODEL_BLACKOUT_OVERRIDE: dict[str, str] = {
+    "cassia leach": "all_rehearsals",   # blocked 1 PM – 4 PM (all 3 rehearsals)
+}
+
+# Models whose makeup should be placed at the LAST possible slot in the day.
+_LAST_SLOT_MAKEUP_MODELS: set[str] = {
+    "cassia leach",
 }
 
 # Per-model availability windows: (earliest_hour, earliest_min), (latest_hour, latest_min)
@@ -375,6 +387,78 @@ class Scheduler:
 
         return None
 
+    def _find_last_slot(
+        self,
+        service: str,
+        provider_key: str,
+        earliest: datetime,
+        group_key: str | None,
+        model_busy: list[tuple[datetime, datetime]],
+        duration_min: int | None = None,
+        win_end_override: datetime | None = None,
+    ) -> tuple[datetime, datetime] | None:
+        """
+        Find the LATEST available slot in the window (instead of earliest).
+        Builds a list of all blocked intervals, finds free gaps, and returns
+        the last gap large enough to fit the appointment.
+        """
+        win_start, win_end = WINDOWS[service]
+        if win_end_override is not None:
+            win_end = win_end_override
+        effective_start = max(earliest, win_start)
+        dur = timedelta(minutes=duration_min if duration_min is not None else DURATIONS[service])
+        cal = self.calendars.get(provider_key)
+        if not cal:
+            return None
+
+        sibling_service = "makeup" if service == "hair" else "hair"
+        sibling_key = f"{sibling_service}::{cal.name}"
+        sibling_cal = (
+            self.calendars.get(sibling_key)
+            if self.artists.get(cal.name, {}).get("role") == "both"
+            else None
+        )
+
+        # Collect all blocked intervals within the effective window
+        all_provider_slots = cal.slots + (sibling_cal.slots if sibling_cal else [])
+        blocked: list[tuple[datetime, datetime]] = []
+        for s, e, _ in all_provider_slots:
+            if s < win_end and e > effective_start:
+                blocked.append((max(s, effective_start), min(e, win_end)))
+        for ms, me in model_busy:
+            if ms < win_end and me > effective_start:
+                blocked.append((max(ms, effective_start), min(me, win_end)))
+        if group_key and group_key in REHEARSAL_BLACKOUTS:
+            bs, be = REHEARSAL_BLACKOUTS[group_key]
+            if bs < win_end and be > effective_start:
+                blocked.append((max(bs, effective_start), min(be, win_end)))
+
+        # Sort and merge overlapping blocked intervals
+        blocked.sort()
+        merged: list[list[datetime]] = []
+        for s, e in blocked:
+            if merged and s <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([s, e])
+
+        # Find all free intervals and return the latest slot that fits dur
+        last_slot: tuple[datetime, datetime] | None = None
+        cursor = effective_start
+        for bs, be in merged:
+            if cursor + dur <= bs:
+                # Free gap [cursor, bs] — latest start within this gap
+                latest = bs - dur
+                last_slot = (latest, latest + dur)
+            cursor = max(cursor, be)
+        # Remaining free window after last blocked interval
+        if cursor + dur <= win_end:
+            latest = win_end - dur
+            latest = max(latest, cursor)
+            last_slot = (latest, latest + dur)
+
+        return last_slot
+
     def _book(self, service: str, provider_key: str, start: datetime, end: datetime, model_name: str):
         self.calendars[provider_key].book(start, end, model_name)
 
@@ -394,9 +478,13 @@ class Scheduler:
         else:
             model_win_end = None  # use service default
 
+        # Per-model blackout override (e.g. models attending all rehearsals)
+        _name_lower = name.lower().strip()
+        blackout_key = _MODEL_BLACKOUT_OVERRIDE.get(_name_lower, group_key)
+
         # Scheduling hint from Notes field ("later" / "earlier")
         scheduling_hint = model.get("scheduling_hint", "")
-        prefer_afternoon = (scheduling_hint == "later") or (name.lower().strip() in _LATER_HAIR_MODELS)
+        prefer_afternoon = (scheduling_hint == "later") or (_name_lower in _LATER_HAIR_MODELS)
 
         warnings: list[str] = []
 
@@ -421,12 +509,12 @@ class Scheduler:
                 hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
                 best_slot = None
                 for search_start in hair_search_starts:
-                    best_slot = self._find_slot("hair", hair_cal_key, search_start, group_key, model_busy, duration_min=hair_dur, win_end_override=model_win_end)
+                    best_slot = self._find_slot("hair", hair_cal_key, search_start, blackout_key, model_busy, duration_min=hair_dur, win_end_override=model_win_end)
                     if best_slot:
                         break
                 # Fallback: ignore later/earlier hint and try full window
                 if not best_slot:
-                    best_slot = self._find_slot("hair", hair_cal_key, day_start, group_key, model_busy, duration_min=hair_dur, win_end_override=model_win_end)
+                    best_slot = self._find_slot("hair", hair_cal_key, day_start, blackout_key, model_busy, duration_min=hair_dur, win_end_override=model_win_end)
                 if best_slot:
                     start, end = best_slot
                     self._book("hair", hair_cal_key, start, end, name)
@@ -472,23 +560,29 @@ class Scheduler:
                     # Fall back to day_start only if no slot found from hair_end.
                     makeup_earliest = hair_end if hair_end > day_start else day_start
 
-                    # Respect later/earlier scheduling hint for makeup, but cap
-                    # the afternoon search at 4pm so group1 models don't grab the
-                    # only slot group2 models can use (post-blackout window).
-                    _4pm = WINDOWS["makeup"][1] - timedelta(hours=1)  # 4:00 PM
-                    if prefer_afternoon:
-                        # Try afternoon first (from max of hair_end and 2pm).
-                        _2pm = _make_dt(self._event_date, 14, 0)
-                        afternoon_slot = self._find_slot("makeup", mu_cal_key, max(makeup_earliest, _2pm), group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
-                        if afternoon_slot and afternoon_slot[0] < _4pm:
-                            best_slot = afternoon_slot
-                        else:
-                            best_slot = self._find_slot("makeup", mu_cal_key, makeup_earliest, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                    # Models in _LAST_SLOT_MAKEUP_MODELS get the LATEST available slot.
+                    if _name_lower in _LAST_SLOT_MAKEUP_MODELS:
+                        best_slot = self._find_last_slot("makeup", mu_cal_key, makeup_earliest, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                        if not best_slot:
+                            best_slot = self._find_last_slot("makeup", mu_cal_key, day_start, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                     else:
-                        best_slot = self._find_slot("makeup", mu_cal_key, makeup_earliest, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
-                    # If packing after hair didn't work, try anywhere in the day
-                    if not best_slot and makeup_earliest > day_start:
-                        best_slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                        # Respect later/earlier scheduling hint for makeup, but cap
+                        # the afternoon search at 4pm so group1 models don't grab the
+                        # only slot group2 models can use (post-blackout window).
+                        _4pm = WINDOWS["makeup"][1] - timedelta(hours=1)  # 4:00 PM
+                        if prefer_afternoon:
+                            # Try afternoon first (from max of hair_end and 2pm).
+                            _2pm = _make_dt(self._event_date, 14, 0)
+                            afternoon_slot = self._find_slot("makeup", mu_cal_key, max(makeup_earliest, _2pm), blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                            if afternoon_slot and afternoon_slot[0] < _4pm:
+                                best_slot = afternoon_slot
+                            else:
+                                best_slot = self._find_slot("makeup", mu_cal_key, makeup_earliest, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                        else:
+                            best_slot = self._find_slot("makeup", mu_cal_key, makeup_earliest, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
+                        # If packing after hair didn't work, try anywhere in the day
+                        if not best_slot and makeup_earliest > day_start:
+                            best_slot = self._find_slot("makeup", mu_cal_key, day_start, blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
                     if best_slot:
                         start, end = best_slot
                         self._book("makeup", mu_cal_key, start, end, name)
@@ -518,7 +612,7 @@ class Scheduler:
             best_slot, best_key = None, None
             for mk in massage_keys:
                 slot = self._find_slot(
-                    "massage", mk, WINDOWS["massage"][0], group_key, model_busy
+                    "massage", mk, WINDOWS["massage"][0], blackout_key, model_busy
                 )
                 if slot and slot[1] <= massage_deadline:
                     cand_load = self._booking_count(self.calendars[mk].name)
@@ -553,7 +647,7 @@ class Scheduler:
             glam_done = max(hair_end, makeup_end)
             portrait_earliest = max(glam_done, WINDOWS["portrait"][0])
             for pk in sorted(k for k in self.calendars if k.startswith("portrait::")):
-                slot = self._find_slot("portrait", pk, portrait_earliest, group_key, model_busy)
+                slot = self._find_slot("portrait", pk, portrait_earliest, blackout_key, model_busy)
                 if slot:
                     start, end = slot
                     self._book("portrait", pk, start, end, name)
