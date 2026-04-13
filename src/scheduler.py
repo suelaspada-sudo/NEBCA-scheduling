@@ -73,7 +73,8 @@ _LATER_HAIR_MODELS = {
 # Per-model availability windows: (earliest_hour, earliest_min), (latest_hour, latest_min)
 # All appointments for these models must fall within this window.
 _MODEL_AVAILABILITY_TIMES: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {
-    "jaime gagnon": ((11, 0), (14, 30)),
+    "jaime gagnon":   ((11, 0), (14, 30)),
+    "micayla lawson": ((13, 0), (16, 0)),
 }
 
 
