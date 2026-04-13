@@ -691,6 +691,30 @@ class Scheduler:
             "warnings": warnings,
         }
 
+    def _shrink_artist_break(self, cal_key: str, shorten_by_min: int) -> bool:
+        """
+        Trim the artist's break slot by shorten_by_min minutes (from the end).
+        Applied to ALL calendar keys for the same artist so hair+makeup stay in sync.
+        Returns True if a break was found and trimmed.
+        """
+        aname = self.calendars[cal_key].name
+        all_keys = [k for k in self.calendars
+                    if not k.startswith("portrait::") and not k.startswith("massage::")
+                    and self.calendars[k].name == aname]
+        for k in all_keys:
+            for s, e, m in self.calendars[k].slots:
+                if m == "__break__":
+                    new_e = e - timedelta(minutes=shorten_by_min)
+                    if new_e <= s:
+                        return False  # break would vanish — don't do it
+                    for k2 in all_keys:
+                        self.calendars[k2].slots = [
+                            (s2, new_e if (s2 == s and m2 == "__break__") else e2, m2)
+                            for s2, e2, m2 in self.calendars[k2].slots
+                        ]
+                    return True
+        return False
+
     def _book_breaks(self):
         """
         Post-hoc break placement after all model scheduling is done.
@@ -801,11 +825,17 @@ class Scheduler:
             model_busy = [(a["start"], a["end"]) for a in entry["appointments"].values()]
             # Try full window from 10am, ignoring hint.
             slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy, duration_min=mu_dur)
-            # Last resort: extend window to 4:30pm if the normal 4pm window is full.
+            # Extend to 4:30pm if normal window is full.
             if not slot:
                 _430pm = _make_dt(self._event_date, 16, 30)
                 slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy,
                                        duration_min=mu_dur, win_end_override=_430pm)
+            # Shorten artist's break by 10 min and try up to 5pm.
+            if not slot:
+                _5pm = _make_dt(self._event_date, 17, 0)
+                self._shrink_artist_break(mu_cal_key, 10)
+                slot = self._find_slot("makeup", mu_cal_key, day_start, group_key, model_busy,
+                                       duration_min=mu_dur, win_end_override=_5pm)
             if slot:
                 start, end = slot
                 self._book("makeup", mu_cal_key, start, end, entry["model"])
@@ -857,6 +887,70 @@ class Scheduler:
             else:
                 print(f"[RESCUE FAILED] {entry['model']}: still no makeup slot available with {assigned_mu}")
 
+    def _rescue_unscheduled_hair(self):
+        """
+        Third pass: find hair slots for any model that missed one in the main pass.
+        Mirrors the makeup rescue logic — tries progressively wider windows,
+        then shorten the artist's break by 10 min as a last resort.
+        """
+        day_start = WINDOWS["hair"][0]
+        _430pm = _make_dt(self._event_date, 16, 30)
+        _5pm   = _make_dt(self._event_date, 17, 0)
+
+        for entry in self.schedule:
+            if "hair" in entry.get("appointments", {}):
+                continue
+            model = next((m for m in self.models if m["name"] == entry["model"]), None)
+            if not model:
+                continue
+            assigned_hair = model.get("assigned_hair_stylist", "").strip()
+            if not assigned_hair:
+                continue
+            if not model.get("wants_hair", True):
+                continue
+            hair_cal_key = self._resolve_calendar_key("hair", assigned_hair)
+            if not hair_cal_key:
+                continue
+            hair_dur = _parse_duration_min(model.get("hair_time_slot", "")) or DURATIONS["hair"]
+            group_key = _group_key(model)
+            _name_lower = model["name"].lower().strip()
+            blackout_key = _MODEL_BLACKOUT_OVERRIDE.get(_name_lower, group_key)
+            _avail = _MODEL_AVAILABILITY_TIMES.get(_name_lower)
+            model_win_end = _make_dt(self._event_date, *_avail[1]) if _avail else None
+
+            # Rebuild model_busy from already-scheduled appointments
+            model_busy = [(a["start"], a["end"]) for a in entry["appointments"].values()]
+
+            # Try full window from 10am
+            slot = self._find_slot("hair", hair_cal_key, day_start, blackout_key, model_busy,
+                                   duration_min=hair_dur, win_end_override=model_win_end)
+            # Extend to 4:30pm
+            if not slot and model_win_end is None:
+                slot = self._find_slot("hair", hair_cal_key, day_start, blackout_key, model_busy,
+                                       duration_min=hair_dur, win_end_override=_430pm)
+            # Shorten artist's break by 10 min and try up to 5pm
+            if not slot and model_win_end is None:
+                self._shrink_artist_break(hair_cal_key, 10)
+                slot = self._find_slot("hair", hair_cal_key, day_start, blackout_key, model_busy,
+                                       duration_min=hair_dur, win_end_override=_5pm)
+
+            if slot:
+                start, end = slot
+                self._book("hair", hair_cal_key, start, end, entry["model"])
+                provider_name = hair_cal_key[hair_cal_key.index("::") + 2:]
+                entry["appointments"]["hair"] = {
+                    "provider": provider_name,
+                    "start": start,
+                    "end": end,
+                }
+                entry["warnings"] = [
+                    w for w in entry.get("warnings", [])
+                    if "no available hair slot" not in w.lower()
+                ]
+                print(f"[RESCUED] {entry['model']}: hair {fmt_time(start)}–{fmt_time(end)} with {provider_name}")
+            else:
+                print(f"[RESCUE FAILED] {entry['model']}: still no hair slot available with {assigned_hair}")
+
     def run(self) -> list[dict]:
         """
         Schedule all models.
@@ -894,10 +988,15 @@ class Scheduler:
         order = {m["name"]: i for i, m in enumerate(self.models)}
         self.schedule.sort(key=lambda r: order.get(r["model"], 9999))
 
-        # Second pass: rescue any models that missed makeup in the main pass
-        self._rescue_unscheduled_makeup()
-
+        # Place breaks before rescue passes so rescue can shrink them if needed.
         self._book_breaks()
+
+        # Rescue passes: find slots for any model that missed hair or makeup.
+        # Rescue runs after breaks are placed so it can shorten a break by 10 min
+        # as a last resort to free space for a model that couldn't fit otherwise.
+        self._rescue_unscheduled_makeup()
+        self._rescue_unscheduled_hair()
+
         return self.schedule
 
     def get_provider_schedules(self) -> list[dict]:
