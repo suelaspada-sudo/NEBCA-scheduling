@@ -486,13 +486,23 @@ class Scheduler:
         scheduling_hint = model.get("scheduling_hint", "")
         prefer_afternoon = (scheduling_hint == "later") or (_name_lower in _LATER_HAIR_MODELS)
 
+        # Suppress "later" preference when the assigned artist has ≤4 models —
+        # a sparse artist shouldn't sit idle for hours just because a model
+        # has an afternoon hint. Compact their schedule instead.
+        _COMPACT_THRESHOLD = 4
+        assigned_hair = model.get("assigned_hair_stylist", "").strip()
+        assigned_mu   = model.get("assigned_makeup_artist", "").strip()
+        _hair_artist_light = self._artist_model_count.get(assigned_hair, 0) <= _COMPACT_THRESHOLD
+        _mu_artist_light   = self._artist_model_count.get(assigned_mu,   0) <= _COMPACT_THRESHOLD
+        hair_prefer_afternoon  = prefer_afternoon and not _hair_artist_light
+        mu_prefer_afternoon    = prefer_afternoon and not _mu_artist_light
+
         warnings: list[str] = []
 
         # ── 1. Hair ────────────────────────────────────────────────────────────
         # Only schedule if the sheet has an assigned stylist AND Hair != No.
         hair_end = day_start
         hair_cal_key = None
-        assigned_hair = model.get("assigned_hair_stylist", "").strip()
         if assigned_hair and model.get("wants_hair", True):
             hair_cal_key = self._resolve_calendar_key("hair", assigned_hair)
             if not hair_cal_key:
@@ -506,7 +516,7 @@ class Scheduler:
                 # "later" note → try afternoon first, then fall back to morning
                 # Everyone else → fill from 11am in order, no gaps
                 # Prefer afternoon if Notes say "later", but always fall back to day_start
-                hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start] if prefer_afternoon else [day_start]
+                hair_search_starts = [WINDOWS["hair"][1] - timedelta(hours=3), day_start] if hair_prefer_afternoon else [day_start]
                 best_slot = None
                 for search_start in hair_search_starts:
                     best_slot = self._find_slot("hair", hair_cal_key, search_start, blackout_key, model_busy, duration_min=hair_dur, win_end_override=model_win_end)
@@ -570,7 +580,7 @@ class Scheduler:
                         # the afternoon search at 4pm so group1 models don't grab the
                         # only slot group2 models can use (post-blackout window).
                         _4pm = WINDOWS["makeup"][1] - timedelta(hours=1)  # 4:00 PM
-                        if prefer_afternoon:
+                        if mu_prefer_afternoon:
                             # Try afternoon first (from max of hair_end and 2pm).
                             _2pm = _make_dt(self._event_date, 14, 0)
                             afternoon_slot = self._find_slot("makeup", mu_cal_key, max(makeup_earliest, _2pm), blackout_key, model_busy, duration_min=mu_dur, win_end_override=model_win_end)
